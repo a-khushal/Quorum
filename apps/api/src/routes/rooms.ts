@@ -1,5 +1,5 @@
 import prisma from "@repo/db";
-import { addUserToRoom, expireRoom, getRoomState, getRoomUserCount, setRoomState } from "@repo/db/redis";
+import { addUserToRoom, deleteRoomState, getRoomState, getRoomUserCount, setRoomState } from "@repo/db/redis";
 import type { Response } from "express";
 import { Router } from "express";
 
@@ -124,8 +124,7 @@ router.patch("/:id/end", async (req: AuthenticatedRequest, res: Response) => {
     },
   });
 
-  await setRoomState(updatedRoom.id, "ended");
-  await expireRoom(updatedRoom.id, 1);
+  await deleteRoomState(updatedRoom.id);
 
   res.status(200).json({ room: updatedRoom });
 });

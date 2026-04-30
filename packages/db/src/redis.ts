@@ -44,4 +44,8 @@ export const expireRoom = async (roomId: string, ttlSeconds = ROOM_TTL_SECONDS) 
   await redisClient.expire(roomUsersKey(roomId), ttlSeconds);
 };
 
+export const deleteRoomState = async (roomId: string) => {
+  await redisClient.del([roomStateKey(roomId), roomUsersKey(roomId)]);
+};
+
 export { ROOM_TTL_SECONDS };
