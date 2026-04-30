@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  refreshTokens RefreshToken[]
+  roomsCreated  Room[]
+  feedback      Feedback[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  family    String
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Room {
+  id        String     @id @default(uuid())
+  createdBy String
+  status    RoomStatus @default(CREATED)
+  language  String     @default("javascript")
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime   @default(now())
+
+  creator  User     @relation(fields: [createdBy], references: [id])
+  feedback Feedback?
+
+  @@map("rooms")
+}
+
+enum RoomStatus {
+  CREATED
+  ACTIVE
+  ENDED
+}
+
+model Feedback {
+  id            String        @id @default(uuid())
+  roomId        String        @unique
+  interviewerId String
+  notes         String?
+  rating        Int?
+  decision      HireDecision?
+  submittedAt   DateTime      @default(now())
+
+  room        Room @relation(fields: [roomId], references: [id])
+  interviewer User @relation(fields: [interviewerId], references: [id])
+
+  @@map("feedback")
+}
+
+enum HireDecision {
+  STRONG_HIRE
+  HIRE
+  NO_HIRE
+}

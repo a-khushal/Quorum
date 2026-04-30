@@ -26,6 +26,8 @@ coverage
 out/
 build
 dist
+*.tsbuildinfo
+next-env.d.ts
 
 
 # Debug
@@ -36,3 +38,4 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+a.md
