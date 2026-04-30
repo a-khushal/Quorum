@@ -37,7 +37,7 @@ model Room {
   id        String     @id @default(uuid())
   createdBy String
   status    RoomStatus @default(CREATED)
-  language  String     @default("javascript")
+  language  RoomLanguage @default(TYPESCRIPT)
   startedAt DateTime?
   endedAt   DateTime?
   createdAt DateTime   @default(now())
@@ -46,6 +46,15 @@ model Room {
   feedback Feedback?
 
   @@map("rooms")
+}
+
+enum RoomLanguage {
+  TYPESCRIPT
+  PYTHON
+  JAVA
+  GO
+  CPP
+  C
 }
 
 enum RoomStatus {

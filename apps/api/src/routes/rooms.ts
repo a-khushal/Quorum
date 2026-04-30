@@ -6,7 +6,25 @@ import { Router } from "express";
 import { type AuthenticatedRequest, validateToken } from "../middleware/validateToken.js";
 
 const router: Router = Router();
-const allowedLanguages = new Set(["javascript", "typescript", "python", "java", "go", "cpp", "c"]);
+const allowedLanguages = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"] as const;
+type RoomLanguage = (typeof allowedLanguages)[number];
+
+const isRoomLanguage = (value: string): value is RoomLanguage => {
+  return allowedLanguages.includes(value as RoomLanguage);
+};
+
+const parseRoomLanguage = (value: unknown): RoomLanguage | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalizedValue = value.trim().toUpperCase();
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  return isRoomLanguage(normalizedValue) ? normalizedValue : undefined;
+};
 
 const getParam = (value: string | string[] | undefined) => {
   return typeof value === "string" ? value : "";
@@ -20,24 +38,31 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  const requestedLanguage =
-    typeof req.body?.language === "string" ? req.body.language.trim().toLowerCase() : "";
+  const requestedLanguage = req.body?.language;
+  const language = parseRoomLanguage(requestedLanguage);
 
-  if (requestedLanguage && !allowedLanguages.has(requestedLanguage)) {
+  if (typeof requestedLanguage === "string" && requestedLanguage.trim() && !language) {
     res.status(400).json({
       error: "Unsupported language",
-      allowedLanguages: Array.from(allowedLanguages),
+      allowedLanguages,
     });
     return;
   }
 
-  const room = await prisma.room.create({
-    data: {
-      createdBy: req.user.id,
-      status: "CREATED",
-      ...(requestedLanguage ? { language: requestedLanguage } : {}),
-    },
-  });
+  const room = language
+    ? await prisma.room.create({
+        data: {
+          createdBy: req.user.id,
+          status: "CREATED",
+          language,
+        },
+      })
+    : await prisma.room.create({
+        data: {
+          createdBy: req.user.id,
+          status: "CREATED",
+        },
+      });
 
   await setRoomState(room.id, "created");
   await addUserToRoom(room.id, req.user.id);
