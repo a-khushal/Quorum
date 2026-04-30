@@ -4,6 +4,7 @@ import express from "express";
 import "./config/env.js";
 import { authRouter } from "./routes/auth.js";
 import { type AuthenticatedRequest, validateToken } from "./middleware/validateToken.js";
+import { roomsRouter } from "./routes/rooms.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -16,6 +17,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRouter);
+app.use("/rooms", roomsRouter);
 
 app.get("/protected", validateToken, (req: AuthenticatedRequest, res) => {
   res.status(200).json({ user: req.user });
