@@ -1,6 +1,7 @@
 import cookieParser from "cookie-parser";
 import express from "express";
 
+import "./config/env.js";
 import { authRouter } from "./routes/auth.js";
 import { type AuthenticatedRequest, validateToken } from "./middleware/validateToken.js";
 
