@@ -60,6 +60,9 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const remoteUserIdRef = useRef<string | null>(null);
+  const makingOfferRef = useRef(false);
+  const ignoredOfferRef = useRef(false);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const [signalState, setSignalState] = useState<"connected" | "reconnecting" | "disconnected">("disconnected");
   const [callState, setCallState] = useState<"idle" | "connecting" | "connected" | "ended" | "error">("idle");
@@ -102,6 +105,13 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
   }, [selectedAudioDeviceId, selectedVideoDeviceId]);
 
   const ensureLocalStream = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const message = "This browser does not support camera/microphone APIs";
+      setMediaError(message);
+      setCallState("error");
+      throw new Error(message);
+    }
+
     if (localStreamRef.current) {
       return localStreamRef.current;
     }
@@ -145,6 +155,10 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
+
+    pendingIceCandidatesRef.current = [];
+    makingOfferRef.current = false;
+    ignoredOfferRef.current = false;
   };
 
   const ensurePeerConnection = useCallback(async (remoteUserId: string) => {
@@ -209,6 +223,11 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
     try {
       setCallState("connecting");
       const pc = await ensurePeerConnection(remoteUserId);
+      if (pc.signalingState !== "stable") {
+        return;
+      }
+
+      makingOfferRef.current = true;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -219,6 +238,8 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
       });
     } catch {
       setCallState("error");
+    } finally {
+      makingOfferRef.current = false;
     }
   }, [ensurePeerConnection, roomId, sendSignal]);
 
@@ -352,10 +373,6 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
       }
     };
 
-    const shouldInitiateWith = (otherUserId: string) => {
-      return currentUserId.localeCompare(otherUserId) < 0;
-    };
-
     const handleSignalMessage = async (event: MessageEvent<string>) => {
       let message: SignalPayload;
       try {
@@ -365,9 +382,7 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
       }
 
       if (message.type === "peer-joined" && message.channel === "signal" && message.userId !== currentUserId) {
-        if (shouldInitiateWith(message.userId)) {
-          await createOffer(message.userId);
-        }
+        await createOffer(message.userId);
         return;
       }
 
@@ -390,7 +405,27 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
 
       if (message.type === "offer" && message.sdp && message.fromUserId) {
         const pc = await ensurePeerConnection(message.fromUserId);
+        const polite = currentUserId.localeCompare(message.fromUserId) > 0;
+        const offerCollision = makingOfferRef.current || pc.signalingState !== "stable";
+        ignoredOfferRef.current = !polite && offerCollision;
+
+        if (ignoredOfferRef.current) {
+          return;
+        }
+
+        if (offerCollision) {
+          await pc.setLocalDescription({ type: "rollback" });
+        }
+
         await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+
+        if (pendingIceCandidatesRef.current.length > 0) {
+          for (const queuedCandidate of pendingIceCandidatesRef.current) {
+            await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+          }
+          pendingIceCandidatesRef.current = [];
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         sendSignal({ type: "answer", roomId, sdp: answer });
@@ -400,12 +435,33 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
 
       if (message.type === "answer" && message.sdp && message.fromUserId) {
         const pc = await ensurePeerConnection(message.fromUserId);
+        if (pc.signalingState !== "have-local-offer") {
+          return;
+        }
+
         await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+
+        if (pendingIceCandidatesRef.current.length > 0) {
+          for (const queuedCandidate of pendingIceCandidatesRef.current) {
+            await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+          }
+          pendingIceCandidatesRef.current = [];
+        }
+
         return;
       }
 
       if (message.type === "ice" && message.candidate && message.fromUserId) {
+        if (ignoredOfferRef.current) {
+          return;
+        }
+
         const pc = await ensurePeerConnection(message.fromUserId);
+        if (!pc.remoteDescription) {
+          pendingIceCandidatesRef.current.push(message.candidate);
+          return;
+        }
+
         await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
       }
     };
@@ -444,7 +500,9 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
       };
 
       socket.onmessage = (event) => {
-        void handleSignalMessage(event);
+        void handleSignalMessage(event).catch(() => {
+          setCallState("error");
+        });
       };
 
       socket.onerror = () => {
@@ -534,6 +592,11 @@ export const VideoCallPanel = ({ roomId, accessToken, currentUserId }: VideoCall
     }
 
     try {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setMediaError("Screen sharing is not supported in this browser");
+        return;
+      }
+
       const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const displayTrack = displayStream.getVideoTracks()[0];
       if (!displayTrack) {

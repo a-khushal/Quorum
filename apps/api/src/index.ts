@@ -1,7 +1,8 @@
 import cookieParser from "cookie-parser";
+import cors from "cors";
 import express from "express";
 
-import "./config/env.js";
+import { env } from "./config/env.js";
 import { authRouter } from "./routes/auth.js";
 import { executeRouter } from "./routes/execute.js";
 import { type AuthenticatedRequest, validateToken } from "./middleware/validateToken.js";
@@ -11,6 +12,12 @@ const app = express();
 const port = Number(process.env.PORT ?? 3001);
 
 app.use(express.json());
+app.use(
+  cors({
+    origin: env.corsOrigin,
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 
 app.get("/health", (_req, res) => {

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { editor } from "monaco-editor";
 import * as Y from "yjs";
 
 import { apiRequest } from "../lib/api";
@@ -25,6 +26,13 @@ type RoomResponse = {
     state: string | null;
     userCount: number;
   };
+  lastExecution: {
+    type: "execution-result" | "execution-error";
+    roomId: string;
+    stdout?: string;
+    status?: string;
+    message?: string;
+  } | null;
 };
 
 type RelayEvent =
@@ -52,6 +60,7 @@ type RelayEvent =
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
 const maxSourceCodeLength = 20_000;
+const maxOutputLength = 80_000;
 
 const defaultTemplates: Record<RoomLanguage, string> = {
   TYPESCRIPT: "console.log('hello from quorum')",
@@ -67,7 +76,51 @@ const defaultTemplates: Record<RoomLanguage, string> = {
 const getDraftKey = (roomId: string) => `quorum_room_draft_${roomId}`;
 
 const sanitizeOutput = (value: string) => {
-  return value.split(String.fromCharCode(0)).join("");
+  const safe = value.split(String.fromCharCode(0)).join("");
+  if (safe.length <= maxOutputLength) {
+    return safe;
+  }
+
+  return `${safe.slice(0, maxOutputLength)}\n\n[truncated ${safe.length - maxOutputLength} chars]`;
+};
+
+const applyTextDiff = (yText: Y.Text, nextValue: string) => {
+  const prevValue = yText.toString();
+  if (prevValue === nextValue) {
+    return;
+  }
+
+  let start = 0;
+  while (start < prevValue.length && start < nextValue.length && prevValue[start] === nextValue[start]) {
+    start += 1;
+  }
+
+  let prevEnd = prevValue.length - 1;
+  let nextEnd = nextValue.length - 1;
+  while (prevEnd >= start && nextEnd >= start && prevValue[prevEnd] === nextValue[nextEnd]) {
+    prevEnd -= 1;
+    nextEnd -= 1;
+  }
+
+  const deleteCount = prevEnd - start + 1;
+  const insertText = nextValue.slice(start, nextEnd + 1);
+
+  yText.doc?.transact(() => {
+    if (deleteCount > 0) {
+      yText.delete(start, deleteCount);
+    }
+
+    if (insertText.length > 0) {
+      yText.insert(start, insertText);
+    }
+  }, "local-editor");
+};
+
+const addHistoryEntry = (
+  setHistory: React.Dispatch<React.SetStateAction<Array<{ id: string; status: string; at: string }>>>,
+  status: string,
+) => {
+  setHistory((prev) => [{ id: crypto.randomUUID(), status, at: new Date().toLocaleTimeString() }, ...prev].slice(0, 8));
 };
 
 const markRequestIdSeen = (store: Set<string>, requestId: string) => {
@@ -101,6 +154,10 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const isApplyingRemoteUpdateRef = useRef(false);
   const recentRequestIdsRef = useRef<Set<string>>(new Set());
   const previousConnectionStateRef = useRef<"connected" | "reconnecting" | "disconnected">("disconnected");
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const hasSyncedYjsRef = useRef(false);
+  const pendingInitialDraftRef = useRef<string | null>(null);
+  const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; status: string; at: string }>>([]);
   const { pushToast } = useToast();
 
   const canExecute = useMemo(() => {
@@ -122,7 +179,23 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
         const draftKey = getDraftKey(roomId);
         const draft = window.localStorage.getItem(draftKey);
-        setSourceCode(draft && draft.trim() ? draft : defaultTemplates[roomLanguage]);
+        const initialDraft = draft && draft.trim() ? draft : defaultTemplates[roomLanguage];
+        pendingInitialDraftRef.current = initialDraft;
+        setSourceCode(initialDraft);
+
+        if (response.lastExecution) {
+          if (response.lastExecution.type === "execution-result") {
+            setOutput(sanitizeOutput(response.lastExecution.stdout ?? "(no output)"));
+            setExecutionState("success");
+          } else {
+            setOutput(
+              sanitizeOutput(
+                `${response.lastExecution.status ?? "Execution Failed"}: ${response.lastExecution.message ?? "Execution failed"}`,
+              ),
+            );
+            setExecutionState("error");
+          }
+        }
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Failed to load room";
         setError(message);
@@ -175,6 +248,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
         setOutput(message.stdout || "(no output)");
         setExecutionState("success");
+        addHistoryEntry(setExecutionHistory, "success");
         pushToast("Execution completed", "success");
         return;
       }
@@ -188,8 +262,9 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
           markRequestIdSeen(recentRequestIdsRef.current, message.requestId);
         }
 
-        setOutput(`${message.status}: ${message.message}`);
+        setOutput(sanitizeOutput(`${message.status}: ${message.message}`));
         setExecutionState("error");
+        addHistoryEntry(setExecutionHistory, "error");
         pushToast("Execution failed", "error");
         return;
       }
@@ -282,12 +357,40 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     const prev = previousConnectionStateRef.current;
     if (prev === "reconnecting" && connectionState === "connected") {
       pushToast("Relay reconnected", "success");
+
+      const syncLatestExecution = async () => {
+        try {
+          const response = await apiRequest<RoomResponse>(`/rooms/${roomId}`, { accessToken });
+          if (!response.lastExecution) {
+            return;
+          }
+
+          if (response.lastExecution.type === "execution-result") {
+            setOutput(sanitizeOutput(response.lastExecution.stdout ?? "(no output)"));
+            setExecutionState("success");
+            return;
+          }
+
+          setOutput(
+            sanitizeOutput(
+              `${response.lastExecution.status ?? "Execution Failed"}: ${response.lastExecution.message ?? "Execution failed"}`,
+            ),
+          );
+          setExecutionState("error");
+        } catch {
+          // best-effort hydrate after reconnect
+        }
+      };
+
+      if (accessToken) {
+        void syncLatestExecution();
+      }
     }
     if (prev !== "disconnected" && connectionState === "disconnected") {
       pushToast("Relay disconnected", "error");
     }
     previousConnectionStateRef.current = connectionState;
-  }, [connectionState, pushToast]);
+  }, [accessToken, connectionState, pushToast, roomId]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -296,6 +399,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
     const yDoc = new Y.Doc();
     const yText = yDoc.getText("source");
+    hasSyncedYjsRef.current = false;
     yDocRef.current = yDoc;
     yTextRef.current = yText;
 
@@ -309,9 +413,22 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
         return;
       }
 
+      const currentEditor = editorRef.current;
+      const previousSelection = currentEditor?.getSelection();
+      const previousPosition = currentEditor?.getPosition();
+
       isApplyingRemoteUpdateRef.current = true;
       setSourceCode(yText.toString());
       isApplyingRemoteUpdateRef.current = false;
+
+      if (currentEditor) {
+        if (previousSelection) {
+          currentEditor.setSelection(previousSelection);
+        }
+        if (previousPosition) {
+          currentEditor.setPosition(previousPosition);
+        }
+      }
     };
 
     yText.observe(onYTextUpdate);
@@ -329,9 +446,50 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     yDoc.on("update", onDocUpdate);
 
     ws.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        return;
+      }
+
       const data = event.data;
-      const update = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBufferLike);
-      Y.applyUpdate(yDoc, update, "ws-sync");
+      let update: Uint8Array;
+
+      if (data instanceof ArrayBuffer) {
+        update = new Uint8Array(data);
+      } else if (data instanceof Blob) {
+        return;
+      } else {
+        update = new Uint8Array(data as ArrayBufferLike);
+      }
+
+      if (update.byteLength === 0) {
+        return;
+      }
+
+      try {
+        Y.applyUpdate(yDoc, update, "ws-sync");
+        hasSyncedYjsRef.current = true;
+
+        const draft = pendingInitialDraftRef.current;
+        if (draft && yText.length === 0) {
+          applyTextDiff(yText, draft);
+        }
+        pendingInitialDraftRef.current = null;
+      } catch {
+        return;
+      }
+    };
+
+    ws.onopen = () => {
+      setTimeout(() => {
+        if (!hasSyncedYjsRef.current) {
+          const draft = pendingInitialDraftRef.current;
+          if (draft && yText.length === 0) {
+            applyTextDiff(yText, draft);
+          }
+          pendingInitialDraftRef.current = null;
+          hasSyncedYjsRef.current = true;
+        }
+      }, 500);
     };
 
     return () => {
@@ -341,6 +499,8 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
       yjsSocketRef.current = null;
       yTextRef.current = null;
       yDocRef.current = null;
+      hasSyncedYjsRef.current = false;
+      pendingInitialDraftRef.current = null;
     };
   }, [accessToken, roomId]);
 
@@ -348,33 +508,26 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     window.localStorage.setItem(getDraftKey(roomId), sourceCode);
   }, [roomId, sourceCode]);
 
-  useEffect(() => {
+  const onEditorChange = (next: string) => {
+    setSourceCode(next);
     const yText = yTextRef.current;
     if (!yText || isApplyingRemoteUpdateRef.current) {
       return;
     }
 
-    const current = yText.toString();
-    if (current === sourceCode) {
-      return;
-    }
-
-    yText.doc?.transact(() => {
-      yText.delete(0, yText.length);
-      yText.insert(0, sourceCode);
-    }, "local-editor");
-  }, [sourceCode]);
+    applyTextDiff(yText, next);
+  };
 
   const runCode = async () => {
     if (!languages.includes(language)) {
       setExecutionState("error");
-      setOutput("Unsupported language selected");
+      setOutput(sanitizeOutput("Unsupported language selected"));
       return;
     }
 
     if (sourceCode.length > maxSourceCodeLength) {
       setExecutionState("error");
-      setOutput(`Source code exceeds max length ${maxSourceCodeLength}`);
+      setOutput(sanitizeOutput(`Source code exceeds max length ${maxSourceCodeLength}`));
       return;
     }
 
@@ -402,6 +555,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
         setOutput(sanitizeOutput(result.stdout ?? "(no output)"));
         setExecutionState("success");
+        addHistoryEntry(setExecutionHistory, "success");
         pushToast("Execution completed", "success");
       }
 
@@ -414,14 +568,16 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
           markRequestIdSeen(recentRequestIdsRef.current, result.requestId);
         }
 
-        setOutput(`${result.status ?? "Error"}: ${result.message ?? "Execution failed"}`);
+        setOutput(sanitizeOutput(`${result.status ?? "Error"}: ${result.message ?? "Execution failed"}`));
         setExecutionState("error");
+        addHistoryEntry(setExecutionHistory, "error");
         pushToast("Execution failed", "error");
       }
     } catch (runError) {
       const message = runError instanceof Error ? runError.message : "Execution failed";
-      setOutput(message);
+      setOutput(sanitizeOutput(message));
       setExecutionState("error");
+      addHistoryEntry(setExecutionHistory, "error");
       pushToast("Execution request failed", "error");
     }
   };
@@ -456,7 +612,14 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
               ))}
             </select>
           </div>
-            <CodeEditor language={language} value={sourceCode} onChange={setSourceCode} />
+            <CodeEditor
+              language={language}
+              value={sourceCode}
+              onChange={onEditorChange}
+              onEditorMount={(instance) => {
+                editorRef.current = instance;
+              }}
+            />
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -477,6 +640,9 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
             {!canExecute ? <span className="text-sm text-stone-500">Only room creator can execute code</span> : null}
             <span className="rounded-full border border-stone-300 px-3 py-1 text-xs uppercase tracking-wide text-stone-600">
               execution: {executionState}
+            </span>
+            <span className="text-xs text-stone-500">
+              {sourceCode.length}/{maxSourceCodeLength}
             </span>
           </div>
         </section>
@@ -501,6 +667,20 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
       <section className="rounded-2xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
         <h3 className="text-lg font-semibold">Execution Output</h3>
         <pre className="mt-3 min-h-32 overflow-auto rounded-xl bg-stone-900 p-3 font-mono text-sm text-stone-100">{output}</pre>
+        <div className="mt-3">
+          <p className="text-xs uppercase tracking-wide text-stone-500">Recent Runs</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {executionHistory.length === 0 ? <span className="text-sm text-stone-500">No runs yet</span> : null}
+            {executionHistory.map((entry) => (
+              <span
+                key={entry.id}
+                className={`rounded-full border px-3 py-1 text-xs ${entry.status === "success" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-700"}`}
+              >
+                {entry.status} at {entry.at}
+              </span>
+            ))}
+          </div>
+        </div>
       </section>
 
       {user?.id ? <VideoCallPanel roomId={roomId} accessToken={accessToken} currentUserId={user.id} /> : null}

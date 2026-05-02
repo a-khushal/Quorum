@@ -27,4 +27,5 @@ export const env = {
   wsServerUrl: process.env.WS_SERVER_URL ?? "ws://localhost:3002",
   wsInternalSecret: process.env.WS_INTERNAL_SECRET as string,
   nodeEnv: process.env.NODE_ENV ?? "development",
+  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
 };

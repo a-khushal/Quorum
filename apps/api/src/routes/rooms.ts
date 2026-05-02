@@ -1,5 +1,12 @@
 import prisma from "@repo/db";
-import { addUserToRoom, deleteRoomState, getRoomState, getRoomUserCount, setRoomState } from "@repo/db/redis";
+import {
+  addUserToRoom,
+  deleteRoomState,
+  getRoomExecutionSnapshot,
+  getRoomState,
+  getRoomUserCount,
+  setRoomState,
+} from "@repo/db/redis";
 import type { Response } from "express";
 import { Router } from "express";
 
@@ -84,6 +91,7 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
 
   const roomState = await getRoomState(room.id);
   const userCount = await getRoomUserCount(room.id);
+  const lastExecution = await getRoomExecutionSnapshot(room.id);
 
   res.status(200).json({
     room,
@@ -91,6 +99,7 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
       state: roomState,
       userCount,
     },
+    lastExecution,
   });
 });
 

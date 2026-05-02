@@ -1,4 +1,5 @@
 import prisma from "@repo/db";
+import { setRoomExecutionSnapshot } from "@repo/db/redis";
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { Router } from "express";
@@ -159,6 +160,8 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
         requestId,
       } as const;
 
+      await setRoomExecutionSnapshot(roomId, payload);
+
       await publishExecutionEventBestEffort(payload, requestId);
 
       res.status(200).json(payload);
@@ -173,6 +176,8 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
       requestId,
     );
 
+    await setRoomExecutionSnapshot(roomId, payload);
+
     await publishExecutionEventBestEffort(payload, requestId);
 
     res.status(200).json(payload);
@@ -184,6 +189,8 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
       "Execution Failed",
       requestId,
     );
+
+    await setRoomExecutionSnapshot(roomId, payload);
 
     await publishExecutionEventBestEffort(payload, requestId);
 

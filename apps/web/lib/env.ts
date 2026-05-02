@@ -1,13 +1,15 @@
-const getRequired = (key: "NEXT_PUBLIC_API_URL" | "NEXT_PUBLIC_WS_URL") => {
-  const value = process.env[key];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
+const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+const wsUrl = process.env.NEXT_PUBLIC_WS_URL;
 
-  return value;
-};
+if (!apiUrl) {
+  throw new Error("Missing required environment variable: NEXT_PUBLIC_API_URL");
+}
+
+if (!wsUrl) {
+  throw new Error("Missing required environment variable: NEXT_PUBLIC_WS_URL");
+}
 
 export const webEnv = {
-  apiUrl: getRequired("NEXT_PUBLIC_API_URL"),
-  wsUrl: getRequired("NEXT_PUBLIC_WS_URL"),
+  apiUrl,
+  wsUrl,
 };
