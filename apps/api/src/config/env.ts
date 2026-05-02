@@ -17,4 +17,5 @@ export const env = {
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET as string,
   judge0Url: process.env.JUDGE0_URL as string,
   executionProvider: (process.env.EXECUTION_PROVIDER ?? "judge0").toLowerCase(),
+  wsServerUrl: process.env.WS_SERVER_URL ?? "ws://localhost:3002",
 };

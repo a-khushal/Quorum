@@ -1,7 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["DATABASE_URL", "REDIS_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "JUDGE0_URL", "EXECUTION_PROVIDER", "PORT", "WS_PORT", "NODE_ENV"],
+  "globalEnv": ["DATABASE_URL", "REDIS_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "JUDGE0_URL", "EXECUTION_PROVIDER", "WS_SERVER_URL", "PORT", "WS_PORT", "NODE_ENV"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

@@ -4,6 +4,7 @@ import { Router } from "express";
 
 import { type AuthenticatedRequest, validateToken } from "../middleware/validateToken.js";
 import { executeCode } from "../services/execution.js";
+import { publishExecutionEvent } from "../services/executionRelay.js";
 
 const router: Router = Router();
 const allowedLanguages = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"] as const;
@@ -28,6 +29,11 @@ const parseRoomLanguage = (value: unknown): RoomLanguage | undefined => {
 
 const getString = (value: unknown) => {
   return typeof value === "string" ? value.trim() : "";
+};
+
+const getAccessToken = (req: AuthenticatedRequest) => {
+  const authHeader = req.headers.authorization;
+  return authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
 };
 
 router.use(validateToken);
@@ -77,9 +83,10 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 
   try {
     const result = await executeCode(sourceCode, language);
+    const accessToken = getAccessToken(req);
 
     if (result.status.id === 3) {
-      res.status(200).json({
+      const payload = {
         type: "execution-result",
         roomId,
         stdout: result.stdout ?? "",
@@ -87,11 +94,23 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
         time: result.time ?? "",
         memory: String(result.memory ?? ""),
         status: result.status.description,
-      });
+      } as const;
+
+      try {
+        await publishExecutionEvent(roomId, accessToken, payload);
+      } catch (relayError) {
+        console.error("execution relay publish failed", {
+          roomId,
+          type: payload.type,
+          error: relayError instanceof Error ? relayError.message : "Unknown error",
+        });
+      }
+
+      res.status(200).json(payload);
       return;
     }
 
-    res.status(200).json({
+    const payload = {
       type: "execution-error",
       roomId,
       message:
@@ -101,11 +120,41 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
         result.status.description ??
         "Execution failed",
       status: result.status.description,
-    });
+    } as const;
+
+    try {
+      await publishExecutionEvent(roomId, accessToken, payload);
+    } catch (relayError) {
+      console.error("execution relay publish failed", {
+        roomId,
+        type: payload.type,
+        error: relayError instanceof Error ? relayError.message : "Unknown error",
+      });
+    }
+
+    res.status(200).json(payload);
   } catch (error) {
+    const accessToken = getAccessToken(req);
+    const payload = {
+      type: "execution-error",
+      roomId,
+      message: error instanceof Error ? error.message : "Unknown error",
+      status: "Execution Failed",
+    } as const;
+
+    try {
+      await publishExecutionEvent(roomId, accessToken, payload);
+    } catch (relayError) {
+      console.error("execution relay publish failed", {
+        roomId,
+        type: payload.type,
+        error: relayError instanceof Error ? relayError.message : "Unknown error",
+      });
+    }
+
     res.status(502).json({
       error: "Code execution failed",
-      message: error instanceof Error ? error.message : "Unknown error",
+      message: payload.message,
     });
   }
 });
