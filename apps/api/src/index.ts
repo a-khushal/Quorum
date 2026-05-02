@@ -3,6 +3,7 @@ import express from "express";
 
 import "./config/env.js";
 import { authRouter } from "./routes/auth.js";
+import { executeRouter } from "./routes/execute.js";
 import { type AuthenticatedRequest, validateToken } from "./middleware/validateToken.js";
 import { roomsRouter } from "./routes/rooms.js";
 
@@ -17,6 +18,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRouter);
+app.use("/execute", executeRouter);
 app.use("/rooms", roomsRouter);
 
 app.get("/protected", validateToken, (req: AuthenticatedRequest, res) => {

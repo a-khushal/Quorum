@@ -32,6 +32,82 @@ services:
       timeout: 5s
       retries: 5
 
+  judge0-db:
+    image: postgres:16.2
+    container_name: quorum-judge0-db
+    restart: unless-stopped
+    env_file:
+      - ./judge0.conf
+    volumes:
+      - quorum_judge0_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judge0 -d judge0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  judge0-redis:
+    image: redis:alpine
+    container_name: quorum-judge0-redis
+    restart: unless-stopped
+    env_file:
+      - ./judge0.conf
+    command: ["sh", "-c", "docker-entrypoint.sh --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - quorum_judge0_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  judge0:
+    image: judge0/judge0:1.13.0
+    container_name: quorum-judge0
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "2358:2358"
+    environment:
+      REDIS_HOST: judge0-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: judge0redispass
+      POSTGRES_HOST: judge0-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-worker:
+    image: judge0/judge0:1.13.0
+    container_name: quorum-judge0-worker
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    command: ["./scripts/workers"]
+    environment:
+      REDIS_HOST: judge0-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: judge0redispass
+      POSTGRES_HOST: judge0-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0
+    depends_on:
+      judge0:
+        condition: service_started
+
 volumes:
   quorum_postgres_data:
   quorum_redis_data:
+  quorum_judge0_postgres_data:
+  quorum_judge0_redis_data:
