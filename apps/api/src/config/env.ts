@@ -2,7 +2,14 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const requiredEnv = ["DATABASE_URL", "REDIS_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "JUDGE0_URL"] as const;
+const requiredEnv = [
+  "DATABASE_URL",
+  "REDIS_URL",
+  "JWT_SECRET",
+  "JWT_REFRESH_SECRET",
+  "JUDGE0_URL",
+  "WS_INTERNAL_SECRET",
+] as const;
 
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -18,4 +25,6 @@ export const env = {
   judge0Url: process.env.JUDGE0_URL as string,
   executionProvider: (process.env.EXECUTION_PROVIDER ?? "judge0").toLowerCase(),
   wsServerUrl: process.env.WS_SERVER_URL ?? "ws://localhost:3002",
+  wsInternalSecret: process.env.WS_INTERNAL_SECRET as string,
+  nodeEnv: process.env.NODE_ENV ?? "development",
 };

@@ -7,6 +7,18 @@ type RelayChannelDeps = {
   roomSockets: RoomSocketsMap;
 };
 
+export type RelayMessage = {
+  type: "execution-result" | "execution-error";
+  roomId: string;
+  stdout?: string;
+  stderr?: string;
+  time?: string;
+  memory?: string;
+  status?: string;
+  message?: string;
+  requestId?: string;
+};
+
 const sendJson = (ws: WebSocket, payload: unknown) => {
   if (ws.readyState !== WebSocket.OPEN) {
     return;
@@ -25,6 +37,10 @@ const broadcastJson = (deps: RelayChannelDeps, roomId: string, payload: unknown,
 
     sendJson(socket, payload);
   }
+};
+
+export const publishRelayMessage = (deps: RelayChannelDeps, payload: RelayMessage) => {
+  broadcastJson(deps, payload.roomId, payload);
 };
 
 export const handleRelayMessage = (

@@ -5,7 +5,7 @@ import { URL } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { rejectUpgrade, verifyAccessToken } from "./auth.js";
-import { handleRelayMessage } from "./channels/relay.js";
+import { handleRelayMessage, publishRelayMessage, type RelayMessage } from "./channels/relay.js";
 import { handleSignalMessage } from "./channels/signal.js";
 import { handleYjsMessage, sendFullStateOnJoin } from "./channels/yjs.js";
 import { broadcastPresence, setPresenceOnConnect, setPresenceOnDisconnect } from "./presence.js";
@@ -13,6 +13,7 @@ import { addSocketToRoom, getChannelFromPath, removeSocketFromRoom, validateRoom
 import type { RoomSocketsMap, SocketContext } from "./types.js";
 
 const port = Number(process.env.WS_PORT ?? 3002);
+const wsInternalSecret = process.env.WS_INTERNAL_SECRET ?? "";
 
 const server = http.createServer();
 const wss = new WebSocketServer({ noServer: true });
@@ -21,6 +22,43 @@ const roomDocs: Map<string, import("yjs").Doc> = new Map();
 const roomSockets: RoomSocketsMap = new Map();
 const socketContexts = new WeakMap<WebSocket, SocketContext>();
 const heartbeatState = new WeakMap<WebSocket, { isAlive: boolean }>();
+
+server.on("request", (req, res) => {
+  if (req.method !== "POST" || req.url !== "/internal/relay") {
+    res.statusCode = 404;
+    res.end("Not Found");
+    return;
+  }
+
+  if (!wsInternalSecret || req.headers["x-ws-internal-secret"] !== wsInternalSecret) {
+    res.statusCode = 401;
+    res.end("Unauthorized");
+    return;
+  }
+
+  let body = "";
+  req.on("data", (chunk) => {
+    body += chunk.toString();
+  });
+
+  req.on("end", () => {
+    try {
+      const payload = JSON.parse(body) as RelayMessage;
+      if (!payload?.roomId || !payload?.type) {
+        res.statusCode = 400;
+        res.end("Invalid payload");
+        return;
+      }
+
+      publishRelayMessage({ roomSockets }, payload);
+      res.statusCode = 204;
+      res.end();
+    } catch {
+      res.statusCode = 400;
+      res.end("Invalid JSON");
+    }
+  });
+});
 
 server.on("upgrade", async (request, socket, head) => {
   try {

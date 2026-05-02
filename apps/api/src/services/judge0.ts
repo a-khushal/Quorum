@@ -39,7 +39,7 @@ export const getJudge0LanguageId = (language: SupportedLanguage) => {
 
 const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const submitToJudge0 = async (sourceCode: string, languageId: number) => {
+const submitToJudge0 = async (sourceCode: string, languageId: number, requestId?: string) => {
   const response = await fetch(`${env.judge0Url}/submissions?base64_encoded=false&wait=false`, {
     method: "POST",
     headers: {
@@ -55,7 +55,17 @@ const submitToJudge0 = async (sourceCode: string, languageId: number) => {
     throw new Error(`Judge0 submit failed with status ${response.status}`);
   }
 
-  return (await response.json()) as Judge0SubmissionResponse;
+  const submission = (await response.json()) as Judge0SubmissionResponse;
+  console.log(
+    JSON.stringify({
+      event: "execute.judge0.submitted",
+      requestId: requestId ?? "",
+      token: submission.token,
+      languageId,
+    }),
+  );
+
+  return submission;
 };
 
 const getSubmission = async (token: string) => {
@@ -68,9 +78,9 @@ const getSubmission = async (token: string) => {
   return (await response.json()) as ExecutionResult;
 };
 
-export const executeWithJudge0 = async (sourceCode: string, language: SupportedLanguage) => {
+export const executeWithJudge0 = async (sourceCode: string, language: SupportedLanguage, requestId?: string) => {
   const languageId = getJudge0LanguageId(language);
-  const { token } = await submitToJudge0(sourceCode, languageId);
+  const { token } = await submitToJudge0(sourceCode, languageId, requestId);
 
   const timeoutMs = 25_000;
   const intervalMs = 700;
@@ -80,6 +90,15 @@ export const executeWithJudge0 = async (sourceCode: string, language: SupportedL
     const result = await getSubmission(token);
 
     if (terminalStatusIds.has(result.status.id)) {
+      console.log(
+        JSON.stringify({
+          event: "execute.judge0.completed",
+          requestId: requestId ?? "",
+          token,
+          statusId: result.status.id,
+          status: result.status.description,
+        }),
+      );
       return result;
     }
 
