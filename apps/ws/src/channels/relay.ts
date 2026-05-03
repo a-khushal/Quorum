@@ -7,17 +7,22 @@ type RelayChannelDeps = {
   roomSockets: RoomSocketsMap;
 };
 
-export type RelayMessage = {
-  type: "execution-result" | "execution-error";
-  roomId: string;
-  stdout?: string;
-  stderr?: string;
-  time?: string;
-  memory?: string;
-  status?: string;
-  message?: string;
-  requestId?: string;
-};
+export type RelayMessage =
+  | {
+      type: "execution-result" | "execution-error";
+      roomId: string;
+      stdout?: string;
+      stderr?: string;
+      time?: string;
+      memory?: string;
+      status?: string;
+      message?: string;
+      requestId?: string;
+    }
+  | {
+      type: "room-ended";
+      roomId: string;
+    };
 
 const sendJson = (ws: WebSocket, payload: unknown) => {
   if (ws.readyState !== WebSocket.OPEN) {
@@ -70,7 +75,7 @@ export const handleRelayMessage = (
   }
 
   const parsedType = typeof parsed.type === "string" ? parsed.type : "";
-  if (!["execution-result", "execution-error"].includes(parsedType)) {
+  if (!["execution-result", "execution-error", "room-ended"].includes(parsedType)) {
     sendJson(ws, { type: "error", message: "Unsupported relay message" });
     return;
   }

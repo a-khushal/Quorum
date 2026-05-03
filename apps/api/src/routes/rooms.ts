@@ -11,6 +11,7 @@ import type { Response } from "express";
 import { Router } from "express";
 
 import { type AuthenticatedRequest, validateToken } from "../middleware/validateToken.js";
+import { publishRelayEvent } from "../services/executionRelay.js";
 
 const router: Router = Router();
 const allowedLanguages = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"] as const;
@@ -132,6 +133,16 @@ router.patch("/:id/end", async (req: AuthenticatedRequest, res: Response) => {
       endedAt: new Date(),
     },
   });
+
+  // Broadcast room-ended event to all users in the room
+  try {
+    await publishRelayEvent({
+      type: "room-ended",
+      roomId: updatedRoom.id,
+    });
+  } catch (relayError) {
+    console.error("Failed to publish room-ended event:", relayError);
+  }
 
   await deleteRoomState(updatedRoom.id);
 

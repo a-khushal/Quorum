@@ -5,39 +5,64 @@ import Link from "next/link";
 type AppShellProps = {
   roomId: string;
   connectionState: "connected" | "reconnecting" | "disconnected";
+  userCount: number;
   userEmail: string;
   onLogout: () => Promise<void>;
   children: React.ReactNode;
 };
 
-export const AppShell = ({ roomId, connectionState, userEmail, onLogout, children }: AppShellProps) => {
-  const statusTone =
-    connectionState === "connected" ? "text-emerald-700" : connectionState === "reconnecting" ? "text-amber-700" : "text-rose-700";
+export const AppShell = ({
+  roomId,
+  connectionState,
+  userCount,
+  userEmail,
+  onLogout,
+  children,
+}: AppShellProps) => {
+  const connectionDot =
+    connectionState === "connected"
+      ? "bg-nc-success"
+      : connectionState === "reconnecting"
+        ? "bg-nc-warning"
+        : "bg-nc-error";
 
   return (
-    <div className="flex min-h-screen flex-col gap-4 p-4">
-      <header className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <Link href="/" className="text-lg font-semibold tracking-tight">
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* Slim header */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-nc-border bg-nc-card px-4">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-base font-semibold text-nc-text hover:text-nc-primary">
             Quorum
           </Link>
-          <p className="text-sm text-stone-500">Room: {roomId}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className={`rounded-full border border-stone-200 px-3 py-1 text-xs font-medium uppercase tracking-wide ${statusTone}`}>
-            {connectionState}
+          <div className="h-4 w-px bg-nc-border" />
+          <span className="text-sm text-nc-text-secondary">
+            Room: <span className="font-mono text-nc-text">{roomId.slice(0, 8)}</span>
           </span>
-          <span className="text-sm text-stone-600">{userEmail}</span>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${connectionDot}`} />
+            <span className="text-xs text-nc-text-muted capitalize">{connectionState}</span>
+          </div>
+          <div className="h-4 w-px bg-nc-border" />
+          <span className="text-xs text-nc-text-muted">
+            {userCount} {userCount === 1 ? "user" : "users"}
+          </span>
+          <div className="h-4 w-px bg-nc-border" />
+          <span className="max-w-32 truncate text-sm text-nc-text-secondary">{userEmail}</span>
           <button
             type="button"
-            className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-800"
+            className="rounded border border-nc-border bg-nc-card-hover px-2.5 py-1 text-xs font-medium text-nc-text-secondary transition hover:border-nc-text-muted hover:text-nc-text"
             onClick={() => void onLogout()}
           >
             Logout
           </button>
         </div>
       </header>
-      {children}
+
+      {/* Main content */}
+      <main className="flex-1 overflow-hidden">{children}</main>
     </div>
   );
 };

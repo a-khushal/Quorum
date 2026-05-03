@@ -62,7 +62,7 @@ services:
       retries: 5
 
   judge0:
-    image: judge0/judge0:1.13.0
+    image: judge0/judge0:1.13.0-extra
     container_name: quorum-judge0
     restart: unless-stopped
     privileged: true
@@ -71,6 +71,7 @@ services:
     ports:
       - "2358:2358"
     environment:
+      QUEUE: "1.13.0"
       REDIS_HOST: judge0-redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: judge0redispass
@@ -86,7 +87,7 @@ services:
         condition: service_healthy
 
   judge0-worker:
-    image: judge0/judge0:1.13.0
+    image: judge0/judge0:1.13.0-extra
     container_name: quorum-judge0-worker
     restart: unless-stopped
     privileged: true
@@ -94,6 +95,7 @@ services:
       - ./judge0.conf:/judge0.conf:ro
     command: ["./scripts/workers"]
     environment:
+      QUEUE: "1.13.0"
       REDIS_HOST: judge0-redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: judge0redispass

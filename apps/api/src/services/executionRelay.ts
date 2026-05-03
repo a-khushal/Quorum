@@ -1,6 +1,6 @@
 import { env } from "../config/env.js";
 
-export type RelayPayload = {
+export type ExecutionPayload = {
   type: "execution-result" | "execution-error";
   roomId: string;
   stdout?: string;
@@ -12,7 +12,14 @@ export type RelayPayload = {
   requestId?: string;
 };
 
-export const publishExecutionEvent = async (payload: RelayPayload) => {
+export type RoomEndedPayload = {
+  type: "room-ended";
+  roomId: string;
+};
+
+export type RelayPayload = ExecutionPayload | RoomEndedPayload;
+
+export const publishRelayEvent = async (payload: RelayPayload) => {
   // Convert ws:// to http:// for the HTTP relay endpoint
   const httpBaseUrl = env.wsServerUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
   const endpoint = new URL("/internal/relay", httpBaseUrl);
@@ -29,3 +36,6 @@ export const publishExecutionEvent = async (payload: RelayPayload) => {
     throw new Error(`Relay publish failed with status ${response.status}`);
   }
 };
+
+// Alias for backwards compatibility
+export const publishExecutionEvent = publishRelayEvent;

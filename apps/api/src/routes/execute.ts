@@ -6,7 +6,7 @@ import { Router } from "express";
 
 import { type AuthenticatedRequest, validateToken } from "../middleware/validateToken.js";
 import { executeCode, getExecutionProvider } from "../services/execution.js";
-import { publishExecutionEvent, type RelayPayload } from "../services/executionRelay.js";
+import { publishExecutionEvent, type ExecutionPayload } from "../services/executionRelay.js";
 
 const router: Router = Router();
 const allowedLanguages = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"] as const;
@@ -34,7 +34,7 @@ const getString = (value: unknown) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
-const buildExecutionErrorPayload = (roomId: string, message: string, status: string, requestId: string): RelayPayload => {
+const buildExecutionErrorPayload = (roomId: string, message: string, status: string, requestId: string): ExecutionPayload => {
   return {
     type: "execution-error",
     roomId,
@@ -44,7 +44,7 @@ const buildExecutionErrorPayload = (roomId: string, message: string, status: str
   };
 };
 
-const publishExecutionEventBestEffort = async (payload: RelayPayload, requestId: string) => {
+const publishExecutionEventBestEffort = async (payload: ExecutionPayload, requestId: string) => {
   try {
     await publishExecutionEvent(payload);
     console.log(
@@ -121,7 +121,7 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 
   const room = await prisma.room.findUnique({
     where: { id: roomId },
-    select: { id: true, createdBy: true, status: true, language: true },
+    select: { id: true, status: true, language: true },
   });
 
   if (!room) {
@@ -129,8 +129,8 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  if (room.createdBy !== req.user.id) {
-    res.status(403).json({ error: "Only room creator can execute code" });
+  if (room.status === "ENDED") {
+    res.status(400).json({ error: "Room has ended" });
     return;
   }
 

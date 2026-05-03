@@ -36,13 +36,16 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
         {toasts.map((toast) => {
           const toneClass =
             toast.tone === "success"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+              ? "border-nc-success/30 bg-nc-success/10 text-nc-success"
               : toast.tone === "error"
-                ? "border-rose-300 bg-rose-50 text-rose-900"
-                : "border-stone-300 bg-stone-50 text-stone-900";
+                ? "border-nc-error/30 bg-nc-error/10 text-nc-error"
+                : "border-nc-border bg-nc-card text-nc-text";
 
           return (
-            <div key={toast.id} className={`rounded-xl border px-3 py-2 text-sm shadow-sm ${toneClass}`}>
+            <div
+              key={toast.id}
+              className={`pointer-events-auto rounded-lg border px-3 py-2 text-sm shadow-lg ${toneClass}`}
+            >
               {toast.message}
             </div>
           );

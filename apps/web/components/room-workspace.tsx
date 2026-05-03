@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import * as Y from "yjs";
 
 import { apiRequest } from "../lib/api";
@@ -10,8 +11,12 @@ import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
 import { AppShell } from "./app-shell";
 import { CodeEditor } from "./code-editor";
+import { EditorToolbar } from "./editor-toolbar";
+import { OutputPanel } from "./output-panel";
 import { useToast } from "./toast-provider";
-import { VideoCallPanel } from "./video-call-panel";
+import { VideoPanel } from "./video-panel";
+
+const VIDEO_COLLAPSED_KEY = "quorum_video_collapsed";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
@@ -56,6 +61,10 @@ type RelayEvent =
       roomId: string;
       userId: string;
       channel: string;
+    }
+  | {
+      type: "room-ended";
+      roomId: string;
     };
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
@@ -157,15 +166,64 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const hasSyncedYjsRef = useRef(false);
   const pendingInitialDraftRef = useRef<string | null>(null);
+  const videoPanelRef = usePanelRef();
   const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; status: string; at: string }>>([]);
+  const [videoCollapsed, setVideoCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(VIDEO_COLLAPSED_KEY) === "true";
+    }
+    return false; // Default: expanded
+  });
   const { pushToast } = useToast();
+
+  const toggleVideoPanel = useCallback(() => {
+    const panel = videoPanelRef.current;
+    if (!panel) return;
+
+    if (panel.isCollapsed()) {
+      panel.expand();
+      setVideoCollapsed(false);
+      localStorage.setItem(VIDEO_COLLAPSED_KEY, "false");
+    } else {
+      panel.collapse();
+      setVideoCollapsed(true);
+      localStorage.setItem(VIDEO_COLLAPSED_KEY, "true");
+    }
+  }, [videoPanelRef]);
+
+  // Restore collapsed state from localStorage on mount
+  useEffect(() => {
+    if (videoCollapsed && videoPanelRef.current) {
+      videoPanelRef.current.collapse();
+    }
+    // Only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keyboard shortcut: Ctrl+Shift+V to toggle video panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        toggleVideoPanel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleVideoPanel]);
 
   const canExecute = useMemo(() => {
     if (!room || !user) {
       return false;
     }
+    return room.status !== "ENDED";
+  }, [room, user]);
 
-    return room.createdBy === user.id && room.status !== "ENDED";
+  const isRoomAdmin = useMemo(() => {
+    if (!room || !user) {
+      return false;
+    }
+    return room.createdBy === user.id;
   }, [room, user]);
 
   useEffect(() => {
@@ -269,6 +327,12 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
         return;
       }
 
+      if (message.type === "room-ended") {
+        pushToast("Room has ended", "info");
+        router.push("/");
+        return;
+      }
+
       setPresence((prev) => {
         if (!prev) {
           return prev;
@@ -351,7 +415,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
         currentSocket.close();
       }
     };
-  }, [accessToken, pushToast, roomId]);
+  }, [accessToken, pushToast, roomId, router]);
 
   useEffect(() => {
     const prev = previousConnectionStateRef.current;
@@ -584,106 +648,137 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
   const endRoom = async () => {
     try {
-      const response = await apiRequest<{ room: RoomResponse["room"] }>(`/rooms/${roomId}/end`, {
+      await apiRequest<{ room: RoomResponse["room"] }>(`/rooms/${roomId}/end`, {
         method: "PATCH",
         accessToken,
       });
-      setRoom(response.room);
+      pushToast("Room ended", "success");
+      router.push("/");
     } catch (endError) {
       setError(endError instanceof Error ? endError.message : "Failed to end room");
     }
   };
 
+  // Show error states
+  if (roomNotFound) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-nc-body">
+        <h1 className="text-xl font-semibold text-nc-text">Room Not Found</h1>
+        <p className="text-nc-text-secondary">The room you&apos;re looking for doesn&apos;t exist or has been deleted.</p>
+        <button
+          type="button"
+          className="rounded border border-nc-border bg-nc-card px-4 py-2 text-sm text-nc-text transition hover:bg-nc-card-hover"
+          onClick={() => router.push("/")}
+        >
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+
+  if (error && !room) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-nc-body">
+        <h1 className="text-xl font-semibold text-nc-error">Error</h1>
+        <p className="text-nc-text-secondary">{error}</p>
+        <button
+          type="button"
+          className="rounded border border-nc-border bg-nc-card px-4 py-2 text-sm text-nc-text transition hover:bg-nc-card-hover"
+          onClick={() => router.push("/")}
+        >
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <AppShell roomId={roomId} connectionState={connectionState} userEmail={user?.email ?? ""} onLogout={logout}>
-      <main className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <section className="flex w-full flex-col gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-semibold">Editor</h2>
-            <select
-              className="rounded-lg border border-stone-300 bg-white px-3 py-2"
-              value={language}
-              onChange={(event) => setLanguage(event.target.value as RoomLanguage)}
-            >
-              {languages.map((lang) => (
-                <option key={lang} value={lang}>
-                  {lang}
-                </option>
-              ))}
-            </select>
-          </div>
-            <CodeEditor
+    <AppShell
+      roomId={roomId}
+      connectionState={connectionState}
+      userCount={presence?.userCount ?? 0}
+      userEmail={user?.email ?? ""}
+      onLogout={logout}
+    >
+      <Group orientation="horizontal" className="h-full">
+        {/* Main workspace area */}
+        <Panel id="workspace" defaultSize="75%" minSize="50%">
+          <div className="flex h-full flex-col">
+            {/* Editor Toolbar */}
+            <EditorToolbar
               language={language}
-              value={sourceCode}
-              onChange={onEditorChange}
-              onEditorMount={(instance) => {
-                editorRef.current = instance;
-              }}
+              onLanguageChange={setLanguage}
+              onRun={() => void runCode()}
+              onEndRoom={() => void endRoom()}
+              onToggleVideo={toggleVideoPanel}
+              canExecute={canExecute}
+              canEndRoom={isRoomAdmin}
+              isRunning={executionState === "running"}
+              isRoomEnded={room?.status === "ENDED"}
+              isVideoVisible={!videoCollapsed}
+              charCount={sourceCode.length}
+              maxChars={maxSourceCodeLength}
             />
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className="rounded-lg bg-teal-700 px-4 py-2 font-medium text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!canExecute || executionState === "running"}
-              onClick={() => void runCode()}
-            >
-              {executionState === "running" ? "Running..." : "Run"}
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-stone-300 bg-stone-100 px-4 py-2 font-medium text-stone-800 transition hover:bg-stone-200 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!canExecute || room?.status === "ENDED"}
-              onClick={() => void endRoom()}
-            >
-              End Room
-            </button>
-            {!canExecute ? <span className="text-sm text-stone-500">Only room creator can execute code</span> : null}
-            <span className="rounded-full border border-stone-300 px-3 py-1 text-xs uppercase tracking-wide text-stone-600">
-              execution: {executionState}
-            </span>
-            <span className="text-xs text-stone-500">
-              {sourceCode.length}/{maxSourceCodeLength}
-            </span>
-          </div>
-        </section>
 
-        <aside className="flex h-fit flex-col gap-2 rounded-2xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Room Status</h3>
-          {roomNotFound ? <p className="text-sm text-rose-700">Room not found. Check room id and try again.</p> : null}
-          <p className="text-sm">Status: <span className="font-medium">{room?.status ?? "loading"}</span></p>
-          <p className="text-sm">Presence: <span className="font-medium">{presence?.state ?? "unknown"}</span></p>
-          <p className="text-sm">Participants: <span className="font-medium">{presence?.userCount ?? 0}</span></p>
-          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-          <button
-            type="button"
-            className="mt-2 rounded-lg border border-stone-300 bg-stone-100 px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-200"
-            onClick={() => router.push("/")}
+            {/* Split Pane: Editor (top) + Output (bottom) - VS Code style */}
+            <Group orientation="vertical" className="flex-1">
+              {/* Editor Panel - Top */}
+              <Panel id="editor" defaultSize="70%" minSize="30%">
+                <div className="h-full bg-nc-editor">
+                  <CodeEditor
+                    language={language}
+                    value={sourceCode}
+                    onChange={onEditorChange}
+                    onEditorMount={(instance) => {
+                      editorRef.current = instance;
+                    }}
+                  />
+                </div>
+              </Panel>
+
+              {/* Horizontal Resize Handle */}
+              <Separator className="group relative h-1.5 bg-nc-border transition hover:bg-nc-primary data-[resize-handle-state=drag]:bg-nc-primary">
+                <div className="absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize" />
+              </Separator>
+
+              {/* Output Panel - Bottom */}
+              <Panel id="output" defaultSize="30%" minSize="15%">
+                <OutputPanel
+                  output={output}
+                  executionState={executionState}
+                  history={executionHistory}
+                />
+              </Panel>
+            </Group>
+          </div>
+        </Panel>
+
+        {/* Video Panel Resize Handle */}
+        <Separator className="group relative w-1.5 bg-nc-border transition hover:bg-nc-primary data-[resize-handle-state=drag]:bg-nc-primary">
+          <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
+        </Separator>
+
+        {/* Video Panel Sidebar - Collapsible & Resizable */}
+        {user?.id && (
+          <Panel
+            id="video"
+            panelRef={videoPanelRef}
+            defaultSize="30%"
+            minSize="20%"
+            maxSize="50%"
+            collapsible
+            collapsedSize="0%"
           >
-            Back to Home
-          </button>
-        </aside>
-      </main>
-
-      <section className="rounded-2xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
-        <h3 className="text-lg font-semibold">Execution Output</h3>
-        <pre className="mt-3 min-h-32 overflow-auto rounded-xl bg-stone-900 p-3 font-mono text-sm text-stone-100">{output}</pre>
-        <div className="mt-3">
-          <p className="text-xs uppercase tracking-wide text-stone-500">Recent Runs</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {executionHistory.length === 0 ? <span className="text-sm text-stone-500">No runs yet</span> : null}
-            {executionHistory.map((entry) => (
-              <span
-                key={entry.id}
-                className={`rounded-full border px-3 py-1 text-xs ${entry.status === "success" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-700"}`}
-              >
-                {entry.status} at {entry.at}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {user?.id ? <VideoCallPanel roomId={roomId} accessToken={accessToken} currentUserId={user.id} /> : null}
+            <VideoPanel
+              roomId={roomId}
+              accessToken={accessToken}
+              currentUserId={user.id}
+              isCollapsed={videoCollapsed}
+              onToggleCollapse={toggleVideoPanel}
+            />
+          </Panel>
+        )}
+      </Group>
     </AppShell>
   );
 };

@@ -1,11 +1,47 @@
 @import "tailwindcss";
 
+@theme {
+  /* NeetCode-style dark theme colors */
+  --color-nc-body: #202225;
+  --color-nc-card: #2f3136;
+  --color-nc-card-hover: #3a3d42;
+  --color-nc-editor: #1b1b1b;
+  --color-nc-text: #f4f4f4;
+  --color-nc-text-secondary: #c3c3c3;
+  --color-nc-text-muted: #888888;
+  --color-nc-primary: #627eff;
+  --color-nc-primary-hover: #7a92ff;
+  --color-nc-success: #4ade80;
+  --color-nc-success-hover: #22c55e;
+  --color-nc-error: #f87171;
+  --color-nc-warning: #f5a623;
+  --color-nc-border: rgba(255, 255, 255, 0.12);
+  --color-nc-divider: rgba(255, 255, 255, 0.08);
+}
+
 @layer base {
   body {
-    @apply bg-stone-100 text-stone-900;
-    background-image:
-      radial-gradient(circle at 20% 20%, #fdf7ed 0%, transparent 45%),
-      radial-gradient(circle at 85% 5%, #e8f2ef 0%, transparent 40%);
+    background-color: var(--color-nc-body);
+    color: var(--color-nc-text);
     font-family: var(--font-geist-sans), sans-serif;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #636363;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #777;
   }
 }

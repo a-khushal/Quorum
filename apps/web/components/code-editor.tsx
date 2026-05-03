@@ -21,21 +21,27 @@ const languageMap: Record<string, string> = {
 
 export const CodeEditor = ({ language, value, onChange, onEditorMount }: CodeEditorProps) => {
   return (
-    <div className="overflow-hidden rounded-xl border border-stone-300 bg-white">
-      <Editor
-        height="420px"
-        language={languageMap[language] ?? "plaintext"}
-        value={value}
-        onChange={(next) => onChange(next ?? "")}
-        onMount={(instance) => onEditorMount?.(instance)}
-        options={{
-          minimap: { enabled: false },
-          fontSize: 14,
-          wordWrap: "on",
-          scrollBeyondLastLine: false,
-          automaticLayout: true,
-        }}
-      />
-    </div>
+    <Editor
+      height="100%"
+      language={languageMap[language] ?? "plaintext"}
+      theme="vs-dark"
+      value={value}
+      onChange={(next) => onChange(next ?? "")}
+      onMount={(instance) => onEditorMount?.(instance)}
+      options={{
+        minimap: { enabled: false },
+        fontSize: 14,
+        fontFamily: "var(--font-geist-mono), monospace",
+        wordWrap: "on",
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        padding: { top: 12, bottom: 12 },
+        lineNumbersMinChars: 3,
+        folding: true,
+        renderLineHighlight: "line",
+        cursorBlinking: "smooth",
+        cursorSmoothCaretAnimation: "on",
+      }}
+    />
   );
 };
