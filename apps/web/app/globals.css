@@ -26,6 +26,19 @@
     font-family: var(--font-geist-sans), sans-serif;
   }
 
+  /* Isolate Excalidraw from our theme */
+  .excalidraw-wrapper,
+  .excalidraw-wrapper * {
+    font-family: unset;
+  }
+
+  .excalidraw-wrapper .excalidraw {
+    --color-primary: #6965db;
+    --color-primary-darker: #5753d0;
+    --color-primary-darkest: #4a47c9;
+    --color-primary-light: #e3e2fe;
+  }
+
   /* Custom scrollbar for dark theme */
   ::-webkit-scrollbar {
     width: 8px;

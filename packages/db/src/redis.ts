@@ -20,6 +20,7 @@ const roomExecutionKey = (roomId: string) => `room:${roomId}:execution`;
 const roomYjsKey = (roomId: string) => `room:${roomId}:yjs`;
 const roomChatKey = (roomId: string) => `room:${roomId}:chat`;
 const roomLanguageKey = (roomId: string) => `room:${roomId}:language`;
+const roomWhiteboardKey = (roomId: string) => `room:${roomId}:whiteboard`;
 
 export type RoomExecutionSnapshot = {
   type: "execution-result" | "execution-error";
@@ -144,6 +145,21 @@ export const setRoomLanguage = async (roomId: string, language: string, ttlSecon
 
 export const getRoomLanguage = async (roomId: string): Promise<string | null> => {
   return redisClient.get(roomLanguageKey(roomId));
+};
+
+export const setRoomWhiteboardState = async (roomId: string, state: Uint8Array, ttlSeconds = ROOM_TTL_SECONDS) => {
+  const base64 = Buffer.from(state).toString("base64");
+  await redisClient.set(roomWhiteboardKey(roomId), base64);
+  await redisClient.expire(roomWhiteboardKey(roomId), ttlSeconds);
+};
+
+export const getRoomWhiteboardState = async (roomId: string): Promise<Uint8Array | null> => {
+  const base64 = await redisClient.get(roomWhiteboardKey(roomId));
+  if (!base64) {
+    return null;
+  }
+
+  return new Uint8Array(Buffer.from(base64, "base64"));
 };
 
 export { ROOM_TTL_SECONDS };

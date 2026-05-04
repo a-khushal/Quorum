@@ -11,6 +11,7 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/postcss": "^4.2.4",
     "monaco-editor": "^0.55.1",
@@ -20,6 +21,8 @@
     "react-dom": "^19.2.0",
     "react-resizable-panels": "^4.10.0",
     "tailwindcss": "^4.2.4",
+    "y-excalidraw": "^2.0.12",
+    "y-protocols": "^1.0.7",
     "yjs": "^13.6.30"
   },
   "devDependencies": {

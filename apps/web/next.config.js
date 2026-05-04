@@ -8,6 +8,7 @@ const nextConfig = {
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
+  transpilePackages: ["@excalidraw/excalidraw"],
 };
 
 export default nextConfig;

@@ -16,9 +16,13 @@ import { EditorToolbar } from "./editor-toolbar";
 import { OutputPanel } from "./output-panel";
 import { useToast } from "./toast-provider";
 import { VideoPanel } from "./video-panel";
+import { Whiteboard } from "./whiteboard";
 
 const VIDEO_COLLAPSED_KEY = "quorum_video_collapsed";
 const BOTTOM_TAB_KEY = "quorum_bottom_tab";
+const WORKSPACE_VIEW_KEY = "quorum_workspace_view";
+
+type WorkspaceView = "code" | "whiteboard";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
@@ -206,7 +210,19 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return "output";
   });
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(WORKSPACE_VIEW_KEY);
+      return saved === "whiteboard" ? "whiteboard" : "code";
+    }
+    return "code";
+  });
   const { pushToast } = useToast();
+
+  const handleViewChange = useCallback((view: WorkspaceView) => {
+    setWorkspaceView(view);
+    localStorage.setItem(WORKSPACE_VIEW_KEY, view);
+  }, []);
 
   const toggleVideoPanel = useCallback(() => {
     const panel = videoPanelRef.current;
@@ -820,85 +836,92 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
               isVideoVisible={!videoCollapsed}
               charCount={sourceCode.length}
               maxChars={maxSourceCodeLength}
+              currentView={workspaceView}
+              onViewChange={handleViewChange}
             />
 
-            {/* Split Pane: Editor (top) + Output (bottom) - VS Code style */}
-            <Group orientation="vertical" className="flex-1">
-              {/* Editor Panel - Top */}
-              <Panel id="editor" defaultSize="70%" minSize="30%">
-                <div className="h-full bg-nc-editor">
-                  <CodeEditor
-                    language={language}
-                    value={sourceCode}
-                    onChange={onEditorChange}
-                    onEditorMount={(instance) => {
-                      editorRef.current = instance;
-                    }}
-                  />
-                </div>
-              </Panel>
-
-              {/* Horizontal Resize Handle */}
-              <Separator className="group relative h-1.5 bg-nc-border transition hover:bg-nc-primary data-[resize-handle-state=drag]:bg-nc-primary">
-                <div className="absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize" />
-              </Separator>
-
-              {/* Output/Chat Panel - Bottom */}
-              <Panel id="output" defaultSize="30%" minSize="15%">
-                <div className="flex h-full flex-col bg-nc-editor">
-                  {/* Tabs */}
-                  <div className="flex shrink-0 border-b border-nc-border">
-                    <button
-                      type="button"
-                      onClick={switchToOutput}
-                      className={`px-4 py-2 text-sm font-medium transition ${
-                        bottomTab === "output"
-                          ? "border-b-2 border-nc-primary text-nc-text"
-                          : "text-nc-text-secondary hover:text-nc-text"
-                      }`}
-                    >
-                      Output
-                      {executionState === "running" && (
-                        <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={switchToChat}
-                      className={`px-4 py-2 text-sm font-medium transition ${
-                        bottomTab === "chat"
-                          ? "border-b-2 border-nc-primary text-nc-text"
-                          : "text-nc-text-secondary hover:text-nc-text"
-                      }`}
-                    >
-                      Chat
-                      {unreadChatCount > 0 && bottomTab !== "chat" && (
-                        <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-nc-primary px-1.5 text-xs text-white">
-                          {unreadChatCount > 99 ? "99+" : unreadChatCount}
-                        </span>
-                      )}
-                    </button>
+            {workspaceView === "whiteboard" ? (
+              <div className="flex-1 overflow-hidden">
+                <Whiteboard roomId={roomId} accessToken={accessToken} />
+              </div>
+            ) : (
+              <Group orientation="vertical" className="flex-1">
+                {/* Editor Panel - Top */}
+                <Panel id="editor" defaultSize="70%" minSize="30%">
+                  <div className="h-full bg-nc-editor">
+                    <CodeEditor
+                      language={language}
+                      value={sourceCode}
+                      onChange={onEditorChange}
+                      onEditorMount={(instance) => {
+                        editorRef.current = instance;
+                      }}
+                    />
                   </div>
+                </Panel>
 
-                  {/* Tab Content */}
-                  <div className="flex-1 overflow-hidden">
-                    {bottomTab === "output" ? (
-                      <OutputPanel
-                        output={output}
-                        executionState={executionState}
-                        history={executionHistory}
-                      />
-                    ) : (
-                      <ChatPanel
-                        messages={chatMessages}
-                        currentUserId={user?.id ?? ""}
-                        onSendMessage={sendChatMessage}
-                      />
-                    )}
+                {/* Horizontal Resize Handle */}
+                <Separator className="group relative h-1.5 bg-nc-border transition hover:bg-nc-primary data-[resize-handle-state=drag]:bg-nc-primary">
+                  <div className="absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize" />
+                </Separator>
+
+                {/* Output/Chat Panel - Bottom */}
+                <Panel id="output" defaultSize="30%" minSize="15%">
+                  <div className="flex h-full flex-col bg-nc-editor">
+                    {/* Tabs */}
+                    <div className="flex shrink-0 border-b border-nc-border">
+                      <button
+                        type="button"
+                        onClick={switchToOutput}
+                        className={`px-4 py-2 text-sm font-medium transition ${
+                          bottomTab === "output"
+                            ? "border-b-2 border-nc-primary text-nc-text"
+                            : "text-nc-text-secondary hover:text-nc-text"
+                        }`}
+                      >
+                        Output
+                        {executionState === "running" && (
+                          <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={switchToChat}
+                        className={`px-4 py-2 text-sm font-medium transition ${
+                          bottomTab === "chat"
+                            ? "border-b-2 border-nc-primary text-nc-text"
+                            : "text-nc-text-secondary hover:text-nc-text"
+                        }`}
+                      >
+                        Chat
+                        {unreadChatCount > 0 && bottomTab !== "chat" && (
+                          <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-nc-primary px-1.5 text-xs text-white">
+                            {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Tab Content */}
+                    <div className="flex-1 overflow-hidden">
+                      {bottomTab === "output" ? (
+                        <OutputPanel
+                          output={output}
+                          executionState={executionState}
+                          history={executionHistory}
+                        />
+                      ) : (
+                        <ChatPanel
+                          messages={chatMessages}
+                          currentUserId={user?.id ?? ""}
+                          onSendMessage={sendChatMessage}
+                        />
+                      )}
+                    </div>
                   </div>
-                </div>
-              </Panel>
-            </Group>
+                </Panel>
+              </Group>
+            )}
           </div>
         </Panel>
 

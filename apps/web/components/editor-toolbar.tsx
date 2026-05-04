@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
+type WorkspaceView = "code" | "whiteboard";
 
 type EditorToolbarProps = {
   language: RoomLanguage;
@@ -17,6 +18,8 @@ type EditorToolbarProps = {
   isVideoVisible: boolean;
   charCount: number;
   maxChars: number;
+  currentView: WorkspaceView;
+  onViewChange: (view: WorkspaceView) => void;
 };
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
@@ -43,6 +46,8 @@ export const EditorToolbar = ({
   isVideoVisible,
   charCount,
   maxChars,
+  currentView,
+  onViewChange,
 }: EditorToolbarProps) => {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
@@ -82,38 +87,74 @@ export const EditorToolbar = ({
 
       <div className="flex h-11 items-center justify-between border-b border-nc-border bg-nc-card px-3">
         <div className="flex items-center gap-2">
-          <select
-            className="h-8 rounded border border-nc-border bg-nc-card-hover px-2 text-sm text-nc-text outline-none transition hover:border-nc-text-muted focus:border-nc-primary"
-            value={language}
-            onChange={(e) => onLanguageChange(e.target.value as RoomLanguage)}
-          >
-            {languages.map((lang) => (
-              <option key={lang} value={lang} className="bg-nc-card">
-                {languageLabels[lang]}
-              </option>
-            ))}
-          </select>
+          {/* View Toggle */}
+          <div className="flex h-8 rounded border border-nc-border bg-nc-card-hover">
+            <button
+              type="button"
+              className={`flex items-center gap-1.5 rounded-l px-3 text-sm font-medium transition ${
+                currentView === "code"
+                  ? "bg-nc-primary text-white"
+                  : "text-nc-text-muted hover:text-nc-text"
+              }`}
+              onClick={() => onViewChange("code")}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              Code
+            </button>
+            <button
+              type="button"
+              className={`flex items-center gap-1.5 rounded-r px-3 text-sm font-medium transition ${
+                currentView === "whiteboard"
+                  ? "bg-nc-primary text-white"
+                  : "text-nc-text-muted hover:text-nc-text"
+              }`}
+              onClick={() => onViewChange("whiteboard")}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+              Whiteboard
+            </button>
+          </div>
 
-          <button
-            type="button"
-            className="flex h-8 items-center gap-1.5 rounded bg-nc-success px-3 text-sm font-medium text-nc-body transition hover:bg-nc-success-hover disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!canExecute || isRunning}
-            onClick={onRun}
-          >
-            {isRunning ? (
-              <>
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-nc-body border-t-transparent" />
-                Running
-              </>
-            ) : (
-              <>
-                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                Run
-              </>
-            )}
-          </button>
+          {currentView === "code" && (
+            <select
+              className="h-8 rounded border border-nc-border bg-nc-card-hover px-2 text-sm text-nc-text outline-none transition hover:border-nc-text-muted focus:border-nc-primary"
+              value={language}
+              onChange={(e) => onLanguageChange(e.target.value as RoomLanguage)}
+            >
+              {languages.map((lang) => (
+                <option key={lang} value={lang} className="bg-nc-card">
+                  {languageLabels[lang]}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {currentView === "code" && (
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded bg-nc-success px-3 text-sm font-medium text-nc-body transition hover:bg-nc-success-hover disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canExecute || isRunning}
+              onClick={onRun}
+            >
+              {isRunning ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-nc-body border-t-transparent" />
+                  Running
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Run
+                </>
+              )}
+            </button>
+          )}
 
           {canEndRoom && (
             <button
@@ -132,9 +173,11 @@ export const EditorToolbar = ({
         </div>
 
       <div className="flex items-center gap-3">
-        <span className="text-xs text-nc-text-muted">
-          {charCount.toLocaleString()}/{maxChars.toLocaleString()}
-        </span>
+        {currentView === "code" && (
+          <span className="text-xs text-nc-text-muted">
+            {charCount.toLocaleString()}/{maxChars.toLocaleString()}
+          </span>
+        )}
         
         {/* Video toggle button */}
         <button
