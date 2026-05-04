@@ -17,14 +17,13 @@ type OutputPanelProps = {
 export const OutputPanel = ({ output, executionState, history }: OutputPanelProps) => {
   return (
     <div className="flex h-full flex-col bg-nc-editor">
-      {/* Header */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-nc-border px-3">
+      {/* Status bar */}
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-nc-border px-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-nc-text">Output</span>
           {executionState === "running" && (
             <span className="flex items-center gap-1.5 text-xs text-nc-warning">
               <span className="h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
-              Running
+              Running...
             </span>
           )}
           {executionState === "success" && (
@@ -51,7 +50,25 @@ export const OutputPanel = ({ output, executionState, history }: OutputPanelProp
               Error
             </span>
           )}
+          {executionState === "idle" && (
+            <span className="text-xs text-nc-text-secondary">Ready</span>
+          )}
         </div>
+
+        {/* History dots */}
+        {history.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {history.map((entry) => (
+              <div
+                key={entry.id}
+                className={`h-2 w-2 rounded-full ${
+                  entry.status === "success" ? "bg-nc-success" : "bg-nc-error"
+                }`}
+                title={`${entry.status} at ${entry.at}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Output content */}
@@ -60,24 +77,6 @@ export const OutputPanel = ({ output, executionState, history }: OutputPanelProp
           {output}
         </pre>
       </div>
-
-      {/* History bar */}
-      {history.length > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-nc-border px-3 py-2">
-          <span className="text-xs text-nc-text-muted">History:</span>
-          <div className="flex items-center gap-1.5">
-            {history.map((entry) => (
-              <div
-                key={entry.id}
-                className={`h-2.5 w-2.5 rounded-full ${
-                  entry.status === "success" ? "bg-nc-success" : "bg-nc-error"
-                }`}
-                title={`${entry.status} at ${entry.at}`}
-              />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -10,6 +10,7 @@ import { apiRequest } from "../lib/api";
 import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
 import { AppShell } from "./app-shell";
+import { ChatPanel, type ChatMessage } from "./chat-panel";
 import { CodeEditor } from "./code-editor";
 import { EditorToolbar } from "./editor-toolbar";
 import { OutputPanel } from "./output-panel";
@@ -65,6 +66,14 @@ type RelayEvent =
   | {
       type: "room-ended";
       roomId: string;
+    }
+  | {
+      type: "chat-message";
+      roomId: string;
+      userId: string;
+      userName: string;
+      message: string;
+      timestamp: number;
     };
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
@@ -174,6 +183,9 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     }
     return false; // Default: expanded
   });
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [bottomTab, setBottomTab] = useState<"output" | "chat">("output");
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const { pushToast } = useToast();
 
   const toggleVideoPanel = useCallback(() => {
@@ -190,6 +202,29 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
       localStorage.setItem(VIDEO_COLLAPSED_KEY, "true");
     }
   }, [videoPanelRef]);
+
+  const sendChatMessage = useCallback(
+    (message: string) => {
+      const ws = relaySocketRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !user) return;
+
+      const chatEvent = {
+        type: "chat-message",
+        roomId,
+        userId: user.id,
+        userName: user.email.split("@")[0],
+        message,
+        timestamp: Date.now(),
+      };
+      ws.send(JSON.stringify(chatEvent));
+    },
+    [roomId, user],
+  );
+
+  const switchToChat = useCallback(() => {
+    setBottomTab("chat");
+    setUnreadChatCount(0);
+  }, []);
 
   // Restore collapsed state from localStorage on mount
   useEffect(() => {
@@ -330,6 +365,20 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
       if (message.type === "room-ended") {
         pushToast("Room has ended", "info");
         router.push("/");
+        return;
+      }
+
+      if (message.type === "chat-message") {
+        const newMessage: ChatMessage = {
+          id: `${message.userId}-${message.timestamp}`,
+          userId: message.userId,
+          userName: message.userName,
+          message: message.message,
+          timestamp: message.timestamp,
+        };
+        setChatMessages((prev) => [...prev, newMessage]);
+        // Only increment unread if not viewing chat tab
+        setUnreadChatCount((prev) => prev + 1);
         return;
       }
 
@@ -741,13 +790,60 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
                 <div className="absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize" />
               </Separator>
 
-              {/* Output Panel - Bottom */}
+              {/* Output/Chat Panel - Bottom */}
               <Panel id="output" defaultSize="30%" minSize="15%">
-                <OutputPanel
-                  output={output}
-                  executionState={executionState}
-                  history={executionHistory}
-                />
+                <div className="flex h-full flex-col bg-nc-editor">
+                  {/* Tabs */}
+                  <div className="flex shrink-0 border-b border-nc-border">
+                    <button
+                      type="button"
+                      onClick={() => setBottomTab("output")}
+                      className={`px-4 py-2 text-sm font-medium transition ${
+                        bottomTab === "output"
+                          ? "border-b-2 border-nc-primary text-nc-text"
+                          : "text-nc-text-secondary hover:text-nc-text"
+                      }`}
+                    >
+                      Output
+                      {executionState === "running" && (
+                        <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={switchToChat}
+                      className={`px-4 py-2 text-sm font-medium transition ${
+                        bottomTab === "chat"
+                          ? "border-b-2 border-nc-primary text-nc-text"
+                          : "text-nc-text-secondary hover:text-nc-text"
+                      }`}
+                    >
+                      Chat
+                      {unreadChatCount > 0 && bottomTab !== "chat" && (
+                        <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-nc-primary px-1.5 text-xs text-white">
+                          {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Tab Content */}
+                  <div className="flex-1 overflow-hidden">
+                    {bottomTab === "output" ? (
+                      <OutputPanel
+                        output={output}
+                        executionState={executionState}
+                        history={executionHistory}
+                      />
+                    ) : (
+                      <ChatPanel
+                        messages={chatMessages}
+                        currentUserId={user?.id ?? ""}
+                        onSendMessage={sendChatMessage}
+                      />
+                    )}
+                  </div>
+                </div>
               </Panel>
             </Group>
           </div>

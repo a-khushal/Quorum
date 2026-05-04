@@ -22,6 +22,14 @@ export type RelayMessage =
   | {
       type: "room-ended";
       roomId: string;
+    }
+  | {
+      type: "chat-message";
+      roomId: string;
+      userId: string;
+      userName: string;
+      message: string;
+      timestamp: number;
     };
 
 const sendJson = (ws: WebSocket, payload: unknown) => {
@@ -75,8 +83,14 @@ export const handleRelayMessage = (
   }
 
   const parsedType = typeof parsed.type === "string" ? parsed.type : "";
-  if (!["execution-result", "execution-error", "room-ended"].includes(parsedType)) {
+  if (!["execution-result", "execution-error", "room-ended", "chat-message"].includes(parsedType)) {
     sendJson(ws, { type: "error", message: "Unsupported relay message" });
+    return;
+  }
+
+  // For chat messages, broadcast to all including sender (so they see their own message)
+  if (parsedType === "chat-message") {
+    broadcastJson(deps, roomId, parsed);
     return;
   }
 
