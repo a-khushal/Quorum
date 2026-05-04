@@ -73,7 +73,7 @@ export const OutputPanel = ({ output, executionState, history }: OutputPanelProp
 
       {/* Output content */}
       <div className="flex-1 overflow-auto p-3">
-        <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-nc-text">
+        <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-nc-text">
           {output}
         </pre>
       </div>

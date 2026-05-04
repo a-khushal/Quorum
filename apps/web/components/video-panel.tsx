@@ -117,14 +117,16 @@ export const VideoPanel = ({
     if (localStreamRef.current) return localStreamRef.current;
 
     try {
+      const wantVideo = cameraEnabledRef.current;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: selectedAudioDeviceId ? { deviceId: { exact: selectedAudioDeviceId } } : true,
-        video: selectedVideoDeviceId ? { deviceId: { exact: selectedVideoDeviceId } } : true,
+        video: wantVideo
+          ? (selectedVideoDeviceId ? { deviceId: { exact: selectedVideoDeviceId } } : true)
+          : false,
       });
       localStreamRef.current = stream;
       
       stream.getAudioTracks().forEach((t) => (t.enabled = micEnabledRef.current));
-      stream.getVideoTracks().forEach((t) => (t.enabled = cameraEnabledRef.current));
       
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       setMediaError("");
@@ -258,16 +260,63 @@ export const VideoPanel = ({
     });
   }, [sendMediaState]);
 
-  const toggleCamera = useCallback(() => {
-    setCameraEnabled((prev) => {
-      const next = !prev;
-      cameraEnabledRef.current = next;
-      localStorage.setItem(CAMERA_ENABLED_KEY, String(next));
-      localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = next));
+  const toggleCamera = useCallback(async () => {
+    const next = !cameraEnabledRef.current;
+    cameraEnabledRef.current = next;
+    setCameraEnabled(next);
+    localStorage.setItem(CAMERA_ENABLED_KEY, String(next));
+
+    if (!localStreamRef.current) {
       sendMediaState(next, micEnabledRef.current);
-      return next;
-    });
-  }, [sendMediaState]);
+      return;
+    }
+
+    const existingTrack = localStreamRef.current.getVideoTracks()[0];
+
+    if (next) {
+      if (!existingTrack) {
+        try {
+          const videoConstraints = selectedVideoDeviceId
+            ? { deviceId: { exact: selectedVideoDeviceId } }
+            : true;
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+          const newTrack = videoStream.getVideoTracks()[0];
+          if (newTrack) {
+            localStreamRef.current.addTrack(newTrack);
+            if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+
+            const pc = peerConnectionRef.current;
+            if (pc) {
+              pc.addTrack(newTrack, localStreamRef.current);
+              
+              if (pc.signalingState === "stable") {
+                makingOfferRef.current = true;
+                try {
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
+                  sendSignal({ type: "offer", roomId, sdp: offer });
+                } finally {
+                  makingOfferRef.current = false;
+                }
+              }
+            }
+          }
+        } catch {
+          cameraEnabledRef.current = false;
+          setCameraEnabled(false);
+          localStorage.setItem(CAMERA_ENABLED_KEY, "false");
+        }
+      } else {
+        existingTrack.enabled = true;
+      }
+    } else {
+      if (existingTrack) {
+        existingTrack.enabled = false;
+      }
+    }
+
+    sendMediaState(cameraEnabledRef.current, micEnabledRef.current);
+  }, [roomId, selectedVideoDeviceId, sendMediaState, sendSignal]);
 
   // Send media state when call connects
   useEffect(() => {
@@ -449,6 +498,13 @@ export const VideoPanel = ({
     }
   }, [isCollapsed]);
 
+  useEffect(() => {
+    if (peerMediaState.video && remoteVideoRef.current && remoteStreamRef.current) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      void remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [peerMediaState.video]);
+
   if (isCollapsed) {
     return <div className="h-full w-full bg-nc-body" />;
   }
@@ -490,7 +546,7 @@ export const VideoPanel = ({
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`h-full w-full object-cover ${!peerMediaState.video ? "hidden" : ""}`}
+            className="h-full w-full object-cover"
           />
           {!peerMediaState.video && (
             <div className="absolute inset-0 flex items-center justify-center bg-nc-card">
@@ -539,7 +595,7 @@ export const VideoPanel = ({
         </button>
         <button
           type="button"
-          onClick={toggleCamera}
+          onClick={() => void toggleCamera()}
           className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
             cameraEnabled ? "bg-nc-card-hover text-nc-text" : "bg-nc-error/20 text-nc-error"
           }`}
