@@ -17,6 +17,8 @@ if (!redisClient.isOpen) {
 const roomStateKey = (roomId: string) => `room:${roomId}:state`;
 const roomUsersKey = (roomId: string) => `room:${roomId}:users`;
 const roomExecutionKey = (roomId: string) => `room:${roomId}:execution`;
+const roomYjsKey = (roomId: string) => `room:${roomId}:yjs`;
+const roomChatKey = (roomId: string) => `room:${roomId}:chat`;
 
 export type RoomExecutionSnapshot = {
   type: "execution-result" | "execution-error";
@@ -87,6 +89,51 @@ export const getRoomExecutionSnapshot = async (roomId: string): Promise<RoomExec
   } catch {
     return null;
   }
+};
+
+export const setRoomYjsState = async (roomId: string, state: Uint8Array, ttlSeconds = ROOM_TTL_SECONDS) => {
+  const base64 = Buffer.from(state).toString("base64");
+  await redisClient.set(roomYjsKey(roomId), base64);
+  await redisClient.expire(roomYjsKey(roomId), ttlSeconds);
+};
+
+export const getRoomYjsState = async (roomId: string): Promise<Uint8Array | null> => {
+  const base64 = await redisClient.get(roomYjsKey(roomId));
+  if (!base64) {
+    return null;
+  }
+
+  return new Uint8Array(Buffer.from(base64, "base64"));
+};
+
+export type ChatMessageRecord = {
+  id: string;
+  userId: string;
+  userName: string;
+  message: string;
+  timestamp: number;
+};
+
+const MAX_CHAT_MESSAGES = 200;
+
+export const addChatMessage = async (roomId: string, message: ChatMessageRecord, ttlSeconds = ROOM_TTL_SECONDS) => {
+  const key = roomChatKey(roomId);
+  await redisClient.rPush(key, JSON.stringify(message));
+  await redisClient.lTrim(key, -MAX_CHAT_MESSAGES, -1);
+  await redisClient.expire(key, ttlSeconds);
+};
+
+export const getChatMessages = async (roomId: string): Promise<ChatMessageRecord[]> => {
+  const key = roomChatKey(roomId);
+  const raw = await redisClient.lRange(key, 0, -1);
+  
+  return raw.map((item) => {
+    try {
+      return JSON.parse(item) as ChatMessageRecord;
+    } catch {
+      return null;
+    }
+  }).filter((msg): msg is ChatMessageRecord => msg !== null);
 };
 
 export { ROOM_TTL_SECONDS };

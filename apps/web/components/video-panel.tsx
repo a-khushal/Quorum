@@ -10,6 +10,7 @@ type SignalPayload =
   | { type: "answer"; roomId: string; sdp: RTCSessionDescriptionInit; fromUserId?: string }
   | { type: "ice"; roomId: string; candidate: RTCIceCandidateInit; fromUserId?: string }
   | { type: "leave" | "renegotiate"; roomId: string; fromUserId?: string }
+  | { type: "media-state"; roomId: string; video: boolean; audio: boolean; fromUserId?: string }
   | { type: "peer-joined" | "peer-left"; roomId: string; userId: string; channel: string }
   | { type: "error"; message: string };
 
@@ -24,6 +25,11 @@ type VideoPanelProps = {
 const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
+
+const MIC_ENABLED_KEY = "quorum_mic_enabled";
+const CAMERA_ENABLED_KEY = "quorum_camera_enabled";
+const AUDIO_DEVICE_KEY = "quorum_audio_device";
+const VIDEO_DEVICE_KEY = "quorum_video_device";
 
 export const VideoPanel = ({
   roomId,
@@ -48,14 +54,37 @@ export const VideoPanel = ({
   const [signalState, setSignalState] = useState<"connected" | "reconnecting" | "disconnected">("disconnected");
   const [callState, setCallState] = useState<"idle" | "connecting" | "connected" | "ended" | "error">("idle");
   const [mediaError, setMediaError] = useState("");
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [screenSharing, setScreenSharing] = useState(false);
+  const [micEnabled, setMicEnabled] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(MIC_ENABLED_KEY) !== "false";
+    }
+    return true;
+  });
+  const [cameraEnabled, setCameraEnabled] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(CAMERA_ENABLED_KEY) !== "false";
+    }
+    return true;
+  });
+  const micEnabledRef = useRef(micEnabled);
+  const cameraEnabledRef = useRef(cameraEnabled);
+  
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState("");
-  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState("");
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(AUDIO_DEVICE_KEY) ?? "";
+    }
+    return "";
+  });
+  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(VIDEO_DEVICE_KEY) ?? "";
+    }
+    return "";
+  });
   const [showDevices, setShowDevices] = useState(false);
+  const [peerMediaState, setPeerMediaState] = useState({ video: true, audio: true });
   const { pushToast } = useToast();
 
   const sendSignal = useCallback((payload: SignalPayload) => {
@@ -63,6 +92,10 @@ export const VideoPanel = ({
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify(payload));
   }, []);
+
+  const sendMediaState = useCallback((video: boolean, audio: boolean) => {
+    sendSignal({ type: "media-state", roomId, video, audio });
+  }, [roomId, sendSignal]);
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -89,6 +122,10 @@ export const VideoPanel = ({
         video: selectedVideoDeviceId ? { deviceId: { exact: selectedVideoDeviceId } } : true,
       });
       localStreamRef.current = stream;
+      
+      stream.getAudioTracks().forEach((t) => (t.enabled = micEnabledRef.current));
+      stream.getVideoTracks().forEach((t) => (t.enabled = cameraEnabledRef.current));
+      
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       setMediaError("");
       return stream;
@@ -120,7 +157,15 @@ export const VideoPanel = ({
   const ensurePeerConnection = useCallback(
     async (remoteUserId: string) => {
       remoteUserIdRef.current = remoteUserId;
-      if (peerConnectionRef.current) return peerConnectionRef.current;
+      
+      const existingPc = peerConnectionRef.current;
+      if (existingPc) {
+        const state = existingPc.connectionState;
+        if (state === "connected" || state === "connecting" || state === "new") {
+          return existingPc;
+        }
+        clearPeerConnection();
+      }
 
       const pc = new RTCPeerConnection(rtcConfig);
       const localStream = await ensureLocalStream();
@@ -147,7 +192,7 @@ export const VideoPanel = ({
       peerConnectionRef.current = pc;
       return pc;
     },
-    [ensureLocalStream, roomId, sendSignal]
+    [clearPeerConnection, ensureLocalStream, roomId, sendSignal]
   );
 
   const createOffer = useCallback(
@@ -176,7 +221,7 @@ export const VideoPanel = ({
     setCallState("ended");
   }, [clearPeerConnection, roomId, sendSignal]);
 
-  const replaceTrack = useCallback(async (kind: "audio" | "video", deviceId: string) => {
+  const replaceTrack = useCallback(async (kind: "audio" | "video", deviceId: string, isEnabled: boolean) => {
     const constraints = kind === "audio" 
       ? { audio: { deviceId: { exact: deviceId } }, video: false } 
       : { audio: false, video: { deviceId: { exact: deviceId } } };
@@ -184,6 +229,8 @@ export const VideoPanel = ({
     const newStream = await navigator.mediaDevices.getUserMedia(constraints);
     const newTrack = kind === "audio" ? newStream.getAudioTracks()[0] : newStream.getVideoTracks()[0];
     if (!newTrack || !localStreamRef.current) return;
+
+    newTrack.enabled = isEnabled;
 
     const oldTrack = kind === "audio" 
       ? localStreamRef.current.getAudioTracks()[0] 
@@ -200,20 +247,35 @@ export const VideoPanel = ({
     if (sender) await sender.replaceTrack(newTrack);
   }, []);
 
-  // Toggle mic
-  useEffect(() => {
-    localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = micEnabled));
-  }, [micEnabled]);
+  const toggleMic = useCallback(() => {
+    setMicEnabled((prev) => {
+      const next = !prev;
+      micEnabledRef.current = next;
+      localStorage.setItem(MIC_ENABLED_KEY, String(next));
+      localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = next));
+      sendMediaState(cameraEnabledRef.current, next);
+      return next;
+    });
+  }, [sendMediaState]);
 
-  // Toggle camera
-  useEffect(() => {
-    localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = cameraEnabled));
-  }, [cameraEnabled]);
+  const toggleCamera = useCallback(() => {
+    setCameraEnabled((prev) => {
+      const next = !prev;
+      cameraEnabledRef.current = next;
+      localStorage.setItem(CAMERA_ENABLED_KEY, String(next));
+      localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = next));
+      sendMediaState(next, micEnabledRef.current);
+      return next;
+    });
+  }, [sendMediaState]);
 
-  // Call state toast
+  // Send media state when call connects
   useEffect(() => {
+    if (callState === "connected") {
+      sendMediaState(cameraEnabledRef.current, micEnabledRef.current);
+    }
     if (callState === "error") pushToast("Call failed", "error");
-  }, [callState, pushToast]);
+  }, [callState, pushToast, sendMediaState]);
 
   // Device change listener
   useEffect(() => {
@@ -245,19 +307,27 @@ export const VideoPanel = ({
       }
 
       if (message.type === "peer-joined" && message.channel === "signal" && message.userId !== currentUserId) {
+        clearPeerConnection();
         await createOffer(message.userId);
         return;
       }
 
       if (message.type === "peer-left" && message.channel === "signal" && message.userId !== currentUserId) {
         clearPeerConnection();
+        setPeerMediaState({ video: true, audio: true });
         setCallState("ended");
         return;
       }
 
       if (message.type === "leave" && message.fromUserId) {
         clearPeerConnection();
+        setPeerMediaState({ video: true, audio: true });
         setCallState("ended");
+        return;
+      }
+
+      if (message.type === "media-state" && message.fromUserId) {
+        setPeerMediaState({ video: message.video, audio: message.audio });
         return;
       }
 
@@ -367,47 +437,6 @@ export const VideoPanel = ({
     };
   }, [accessToken, clearPeerConnection, createOffer, currentUserId, ensureLocalStream, ensurePeerConnection, refreshDevices, roomId, sendSignal]);
 
-  const toggleScreenShare = async () => {
-    if (!localStreamRef.current) return;
-
-    if (screenSharing) {
-      if (selectedVideoDeviceId) await replaceTrack("video", selectedVideoDeviceId);
-      setScreenSharing(false);
-      return;
-    }
-
-    try {
-      if (!navigator.mediaDevices?.getDisplayMedia) {
-        setMediaError("Screen sharing not supported");
-        return;
-      }
-
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const displayTrack = displayStream.getVideoTracks()[0];
-      if (!displayTrack) return;
-
-      const oldTrack = localStreamRef.current.getVideoTracks()[0];
-      if (oldTrack) {
-        localStreamRef.current.removeTrack(oldTrack);
-        oldTrack.stop();
-      }
-      localStreamRef.current.addTrack(displayTrack);
-      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
-
-      const sender = peerConnectionRef.current?.getSenders().find((s) => s.track?.kind === "video");
-      if (sender) await sender.replaceTrack(displayTrack);
-
-      displayTrack.onended = () => {
-        if (selectedVideoDeviceId) void replaceTrack("video", selectedVideoDeviceId);
-        setScreenSharing(false);
-      };
-
-      setScreenSharing(true);
-    } catch {
-      setMediaError("Screen sharing cancelled");
-    }
-  };
-
   const signalDot = signalState === "connected" ? "bg-nc-success" : signalState === "reconnecting" ? "bg-nc-warning" : "bg-nc-error";
 
   useEffect(() => {
@@ -457,10 +486,33 @@ export const VideoPanel = ({
       <div className="flex flex-1 flex-col gap-2 overflow-hidden p-2">
         {/* Remote video */}
         <div className="relative flex-1 overflow-hidden rounded-lg bg-nc-editor">
-          <video ref={remoteVideoRef} autoPlay playsInline className="h-full w-full object-cover" />
-          <span className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">
-            Remote
-          </span>
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className={`h-full w-full object-cover ${!peerMediaState.video ? "hidden" : ""}`}
+          />
+          {!peerMediaState.video && (
+            <div className="absolute inset-0 flex items-center justify-center bg-nc-card">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-nc-border">
+                <svg className="h-8 w-8 text-nc-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+            </div>
+          )}
+          <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
+            <span className="rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">Remote</span>
+            {!peerMediaState.audio && (
+              <span className="flex items-center rounded bg-nc-error/80 px-1.5 py-0.5 text-xs text-white">
+                <svg className="mr-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+                Muted
+              </span>
+            )}
+          </div>
         </div>
         {/* Local video */}
         <div className="relative flex-1 overflow-hidden rounded-lg bg-nc-editor">
@@ -475,7 +527,7 @@ export const VideoPanel = ({
       <div className="flex items-center justify-center gap-2 border-t border-nc-border px-3 py-2">
         <button
           type="button"
-          onClick={() => setMicEnabled((p) => !p)}
+          onClick={toggleMic}
           className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
             micEnabled ? "bg-nc-card-hover text-nc-text" : "bg-nc-error/20 text-nc-error"
           }`}
@@ -487,7 +539,7 @@ export const VideoPanel = ({
         </button>
         <button
           type="button"
-          onClick={() => setCameraEnabled((p) => !p)}
+          onClick={toggleCamera}
           className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
             cameraEnabled ? "bg-nc-card-hover text-nc-text" : "bg-nc-error/20 text-nc-error"
           }`}
@@ -497,19 +549,7 @@ export const VideoPanel = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
         </button>
-        <button
-          type="button"
-          onClick={() => void toggleScreenShare()}
-          className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
-            screenSharing ? "bg-nc-primary/20 text-nc-primary" : "bg-nc-card-hover text-nc-text"
-          }`}
-          title={screenSharing ? "Stop sharing" : "Share screen"}
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
-        </button>
-        <div className="mx-1 h-6 w-px bg-nc-border" />
+        
         <button
           type="button"
           onClick={() => setShowDevices((p) => !p)}
@@ -544,7 +584,8 @@ export const VideoPanel = ({
                 value={selectedAudioDeviceId}
                 onChange={(e) => {
                   setSelectedAudioDeviceId(e.target.value);
-                  void replaceTrack("audio", e.target.value);
+                  localStorage.setItem(AUDIO_DEVICE_KEY, e.target.value);
+                  void replaceTrack("audio", e.target.value, micEnabledRef.current);
                 }}
               >
                 {audioDevices.map((d) => (
@@ -561,7 +602,8 @@ export const VideoPanel = ({
                 value={selectedVideoDeviceId}
                 onChange={(e) => {
                   setSelectedVideoDeviceId(e.target.value);
-                  void replaceTrack("video", e.target.value);
+                  localStorage.setItem(VIDEO_DEVICE_KEY, e.target.value);
+                  void replaceTrack("video", e.target.value, cameraEnabledRef.current);
                 }}
               >
                 {videoDevices.map((d) => (

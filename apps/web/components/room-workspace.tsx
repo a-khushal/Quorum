@@ -18,6 +18,7 @@ import { useToast } from "./toast-provider";
 import { VideoPanel } from "./video-panel";
 
 const VIDEO_COLLAPSED_KEY = "quorum_video_collapsed";
+const BOTTOM_TAB_KEY = "quorum_bottom_tab";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
@@ -39,6 +40,13 @@ type RoomResponse = {
     status?: string;
     message?: string;
   } | null;
+  chatMessages?: Array<{
+    id: string;
+    userId: string;
+    userName: string;
+    message: string;
+    timestamp: number;
+  }>;
 };
 
 type RelayEvent =
@@ -184,7 +192,13 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return false; // Default: expanded
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [bottomTab, setBottomTab] = useState<"output" | "chat">("output");
+  const [bottomTab, setBottomTab] = useState<"output" | "chat">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(BOTTOM_TAB_KEY);
+      return saved === "chat" ? "chat" : "output";
+    }
+    return "output";
+  });
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const { pushToast } = useToast();
 
@@ -224,6 +238,12 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const switchToChat = useCallback(() => {
     setBottomTab("chat");
     setUnreadChatCount(0);
+    localStorage.setItem(BOTTOM_TAB_KEY, "chat");
+  }, []);
+
+  const switchToOutput = useCallback(() => {
+    setBottomTab("output");
+    localStorage.setItem(BOTTOM_TAB_KEY, "output");
   }, []);
 
   // Restore collapsed state from localStorage on mount
@@ -288,6 +308,10 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
             );
             setExecutionState("error");
           }
+        }
+
+        if (response.chatMessages && response.chatMessages.length > 0) {
+          setChatMessages(response.chatMessages);
         }
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : "Failed to load room";
@@ -797,7 +821,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
                   <div className="flex shrink-0 border-b border-nc-border">
                     <button
                       type="button"
-                      onClick={() => setBottomTab("output")}
+                      onClick={switchToOutput}
                       className={`px-4 py-2 text-sm font-medium transition ${
                         bottomTab === "output"
                           ? "border-b-2 border-nc-primary text-nc-text"

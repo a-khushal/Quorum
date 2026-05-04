@@ -2,6 +2,7 @@ import prisma from "@repo/db";
 import {
   addUserToRoom,
   deleteRoomState,
+  getChatMessages,
   getRoomExecutionSnapshot,
   getRoomState,
   getRoomUserCount,
@@ -93,6 +94,7 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
   const roomState = await getRoomState(room.id);
   const userCount = await getRoomUserCount(room.id);
   const lastExecution = await getRoomExecutionSnapshot(room.id);
+  const chatMessages = await getChatMessages(room.id);
 
   res.status(200).json({
     room,
@@ -101,6 +103,7 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
       userCount,
     },
     lastExecution,
+    chatMessages,
   });
 });
 

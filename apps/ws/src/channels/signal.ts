@@ -55,7 +55,7 @@ export const handleSignalMessage = (
   }
 
   const parsedType = typeof parsed.type === "string" ? parsed.type : "";
-  if (!["offer", "answer", "ice", "leave", "renegotiate"].includes(parsedType)) {
+  if (!["offer", "answer", "ice", "leave", "renegotiate", "media-state"].includes(parsedType)) {
     sendJson(ws, { type: "error", message: "Unsupported signaling message" });
     return;
   }

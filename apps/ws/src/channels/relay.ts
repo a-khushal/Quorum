@@ -1,4 +1,5 @@
 import { type RawData, WebSocket } from "ws";
+import { addChatMessage } from "@repo/db/redis";
 
 import { getSocketsForRoom } from "../rooms.js";
 import type { RoomSocketsMap } from "../types.js";
@@ -88,8 +89,20 @@ export const handleRelayMessage = (
     return;
   }
 
-  // For chat messages, broadcast to all including sender (so they see their own message)
   if (parsedType === "chat-message") {
+    const userId = typeof parsed.userId === "string" ? parsed.userId : "";
+    const userName = typeof parsed.userName === "string" ? parsed.userName : "";
+    const message = typeof parsed.message === "string" ? parsed.message : "";
+    const timestamp = typeof parsed.timestamp === "number" ? parsed.timestamp : Date.now();
+
+    void addChatMessage(roomId, {
+      id: `${userId}-${timestamp}`,
+      userId,
+      userName,
+      message,
+      timestamp,
+    });
+
     broadcastJson(deps, roomId, parsed);
     return;
   }

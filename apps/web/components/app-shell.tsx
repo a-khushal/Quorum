@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 type AppShellProps = {
   roomId: string;
@@ -19,6 +20,15 @@ export const AppShell = ({
   onLogout,
   children,
 }: AppShellProps) => {
+  const [copied, setCopied] = useState(false);
+
+  const copyRoomLink = async () => {
+    const url = `${window.location.origin}/room/${roomId}`;
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const connectionDot =
     connectionState === "connected"
       ? "bg-nc-success"
@@ -28,16 +38,24 @@ export const AppShell = ({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {/* Slim header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-nc-border bg-nc-card px-4">
         <div className="flex items-center gap-4">
           <Link href="/" className="text-base font-semibold text-nc-text hover:text-nc-primary">
             Quorum
           </Link>
           <div className="h-4 w-px bg-nc-border" />
-          <span className="text-sm text-nc-text-secondary">
-            Room: <span className="font-mono text-nc-text">{roomId.slice(0, 8)}</span>
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-nc-text-secondary">
+              Room: <span className="font-mono text-nc-text">{roomId.slice(0, 8)}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void copyRoomLink()}
+              className="rounded border border-nc-border px-2 py-0.5 text-xs text-nc-text-secondary transition hover:border-nc-primary hover:text-nc-primary"
+            >
+              {copied ? "Copied!" : "Copy link"}
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">

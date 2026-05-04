@@ -110,7 +110,7 @@ server.on("upgrade", async (request, socket, head) => {
       heartbeatState.set(ws, { isAlive: true });
 
       if (channel === "yjs") {
-        sendFullStateOnJoin({ roomDocs, roomSockets }, roomId, ws);
+        void sendFullStateOnJoin({ roomDocs, roomSockets }, roomId, ws);
       }
 
       void setPresenceOnConnect(roomId, authPayload.sub);
