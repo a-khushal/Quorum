@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
 type EditorToolbarProps = {
@@ -42,57 +44,92 @@ export const EditorToolbar = ({
   charCount,
   maxChars,
 }: EditorToolbarProps) => {
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+
+  const handleEndRoom = () => {
+    setShowEndConfirm(false);
+    onEndRoom();
+  };
+
   return (
-    <div className="flex h-11 items-center justify-between border-b border-nc-border bg-nc-card px-3">
-      <div className="flex items-center gap-2">
-        <select
-          className="h-8 rounded border border-nc-border bg-nc-card-hover px-2 text-sm text-nc-text outline-none transition hover:border-nc-text-muted focus:border-nc-primary"
-          value={language}
-          onChange={(e) => onLanguageChange(e.target.value as RoomLanguage)}
-        >
-          {languages.map((lang) => (
-            <option key={lang} value={lang} className="bg-nc-card">
-              {languageLabels[lang]}
-            </option>
-          ))}
-        </select>
+    <>
+      {showEndConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-sm rounded-lg border border-nc-border bg-nc-card p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-nc-text">End Room?</h3>
+            <p className="mt-2 text-sm text-nc-text-secondary">
+              This will end the session for all participants. This action cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-md border border-nc-border bg-nc-card-hover px-4 py-2 text-sm font-medium text-nc-text transition hover:bg-nc-border"
+                onClick={() => setShowEndConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-nc-error px-4 py-2 text-sm font-medium text-white transition hover:bg-nc-error/90"
+                onClick={handleEndRoom}
+              >
+                End Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-        <button
-          type="button"
-          className="flex h-8 items-center gap-1.5 rounded bg-nc-success px-3 text-sm font-medium text-nc-body transition hover:bg-nc-success-hover disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!canExecute || isRunning}
-          onClick={onRun}
-        >
-          {isRunning ? (
-            <>
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-nc-body border-t-transparent" />
-              Running
-            </>
-          ) : (
-            <>
-              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              Run
-            </>
-          )}
-        </button>
+      <div className="flex h-11 items-center justify-between border-b border-nc-border bg-nc-card px-3">
+        <div className="flex items-center gap-2">
+          <select
+            className="h-8 rounded border border-nc-border bg-nc-card-hover px-2 text-sm text-nc-text outline-none transition hover:border-nc-text-muted focus:border-nc-primary"
+            value={language}
+            onChange={(e) => onLanguageChange(e.target.value as RoomLanguage)}
+          >
+            {languages.map((lang) => (
+              <option key={lang} value={lang} className="bg-nc-card">
+                {languageLabels[lang]}
+              </option>
+            ))}
+          </select>
 
-        {canEndRoom && (
           <button
             type="button"
-            className="flex h-8 items-center gap-1.5 rounded border border-nc-border bg-nc-card-hover px-3 text-sm font-medium text-nc-text-secondary transition hover:border-nc-text-muted hover:text-nc-text disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isRoomEnded}
-            onClick={onEndRoom}
+            className="flex h-8 items-center gap-1.5 rounded bg-nc-success px-3 text-sm font-medium text-nc-body transition hover:bg-nc-success-hover disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!canExecute || isRunning}
+            onClick={onRun}
           >
-            End Room
+            {isRunning ? (
+              <>
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-nc-body border-t-transparent" />
+                Running
+              </>
+            ) : (
+              <>
+                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Run
+              </>
+            )}
           </button>
-        )}
 
-        {isRoomEnded && (
-          <span className="text-xs text-nc-text-muted">Room has ended</span>
-        )}
-      </div>
+          {canEndRoom && (
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded border border-nc-border bg-nc-card-hover px-3 text-sm font-medium text-nc-text-secondary transition hover:border-nc-error hover:text-nc-error disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isRoomEnded}
+              onClick={() => setShowEndConfirm(true)}
+            >
+              End Room
+            </button>
+          )}
+
+          {isRoomEnded && (
+            <span className="text-xs text-nc-text-muted">Room has ended</span>
+          )}
+        </div>
 
       <div className="flex items-center gap-3">
         <span className="text-xs text-nc-text-muted">
@@ -119,7 +156,8 @@ export const EditorToolbar = ({
             />
           </svg>
         </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
