@@ -4,6 +4,7 @@ import {
   deleteRoomState,
   getChatMessages,
   getRoomExecutionSnapshot,
+  getRoomLanguage,
   getRoomState,
   getRoomUserCount,
   setRoomState,
@@ -95,9 +96,13 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response) => {
   const userCount = await getRoomUserCount(room.id);
   const lastExecution = await getRoomExecutionSnapshot(room.id);
   const chatMessages = await getChatMessages(room.id);
+  const currentLanguage = await getRoomLanguage(room.id);
 
   res.status(200).json({
-    room,
+    room: {
+      ...room,
+      language: currentLanguage ?? room.language,
+    },
     presence: {
       state: roomState,
       userCount,

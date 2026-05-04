@@ -19,6 +19,7 @@ const roomUsersKey = (roomId: string) => `room:${roomId}:users`;
 const roomExecutionKey = (roomId: string) => `room:${roomId}:execution`;
 const roomYjsKey = (roomId: string) => `room:${roomId}:yjs`;
 const roomChatKey = (roomId: string) => `room:${roomId}:chat`;
+const roomLanguageKey = (roomId: string) => `room:${roomId}:language`;
 
 export type RoomExecutionSnapshot = {
   type: "execution-result" | "execution-error";
@@ -134,6 +135,15 @@ export const getChatMessages = async (roomId: string): Promise<ChatMessageRecord
       return null;
     }
   }).filter((msg): msg is ChatMessageRecord => msg !== null);
+};
+
+export const setRoomLanguage = async (roomId: string, language: string, ttlSeconds = ROOM_TTL_SECONDS) => {
+  await redisClient.set(roomLanguageKey(roomId), language);
+  await redisClient.expire(roomLanguageKey(roomId), ttlSeconds);
+};
+
+export const getRoomLanguage = async (roomId: string): Promise<string | null> => {
+  return redisClient.get(roomLanguageKey(roomId));
 };
 
 export { ROOM_TTL_SECONDS };

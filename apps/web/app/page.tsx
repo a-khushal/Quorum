@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useAuth } from "../components/auth-provider";
-import { apiRequest } from "../lib/api";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
@@ -22,7 +21,7 @@ const languageLabels: Record<RoomLanguage, string> = {
 
 export default function Home() {
   const router = useRouter();
-  const { state, accessToken, user, logout } = useAuth();
+  const { state, user, logout, authRequest } = useAuth();
   const [roomId, setRoomId] = useState("");
   const [language, setLanguage] = useState<RoomLanguage>("TYPESCRIPT");
   const [error, setError] = useState("");
@@ -30,9 +29,8 @@ export default function Home() {
   const createRoom = async () => {
     setError("");
     try {
-      const response = await apiRequest<{ room: { id: string } }>("/rooms", {
+      const response = await authRequest<{ room: { id: string } }>("/rooms", {
         method: "POST",
-        accessToken,
         body: { language },
       });
       router.push(`/room/${response.room.id}`);

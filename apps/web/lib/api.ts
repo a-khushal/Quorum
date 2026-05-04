@@ -37,3 +37,14 @@ export const apiRequest = async <T>(path: string, options: ApiRequestOptions = {
 
   return data;
 };
+
+export const refreshAccessToken = async (): Promise<string | null> => {
+  try {
+    const response = await apiRequest<{ accessToken: string }>("/auth/refresh", {
+      method: "POST",
+    });
+    return response.accessToken;
+  } catch {
+    return null;
+  }
+};

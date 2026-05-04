@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 
 import { env } from "../config/env.js";
 
-const ACCESS_TOKEN_TTL = "15m";
+const ACCESS_TOKEN_TTL = "1h";
 const REFRESH_TOKEN_TTL = "7d";
 const SALT_ROUNDS = 12;
 

@@ -6,7 +6,7 @@ import type { editor } from "monaco-editor";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import * as Y from "yjs";
 
-import { apiRequest } from "../lib/api";
+
 import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
 import { AppShell } from "./app-shell";
@@ -82,6 +82,12 @@ type RelayEvent =
       userName: string;
       message: string;
       timestamp: number;
+    }
+  | {
+      type: "language-change";
+      roomId: string;
+      language: RoomLanguage;
+      userId: string;
     };
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
@@ -161,7 +167,7 @@ const markRequestIdSeen = (store: Set<string>, requestId: string) => {
 
 export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const router = useRouter();
-  const { accessToken, user, logout } = useAuth();
+  const { accessToken, user, logout, authRequest } = useAuth();
   const [room, setRoom] = useState<RoomResponse["room"] | null>(null);
   const [presence, setPresence] = useState<RoomResponse["presence"] | null>(null);
   const [sourceCode, setSourceCode] = useState(defaultTemplates.TYPESCRIPT);
@@ -235,6 +241,24 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     [roomId, user],
   );
 
+  const handleLanguageChange = useCallback(
+    (newLanguage: RoomLanguage) => {
+      setLanguage(newLanguage);
+
+      const ws = relaySocketRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !user) return;
+
+      const languageEvent = {
+        type: "language-change",
+        roomId,
+        language: newLanguage,
+        userId: user.id,
+      };
+      ws.send(JSON.stringify(languageEvent));
+    },
+    [roomId, user],
+  );
+
   const switchToChat = useCallback(() => {
     setBottomTab("chat");
     setUnreadChatCount(0);
@@ -284,7 +308,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   useEffect(() => {
     const loadRoom = async () => {
       try {
-        const response = await apiRequest<RoomResponse>(`/rooms/${roomId}`, { accessToken });
+        const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
         setRoom(response.room);
         setPresence(response.presence);
         const roomLanguage = response.room.language ?? "TYPESCRIPT";
@@ -406,6 +430,13 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
         return;
       }
 
+      if (message.type === "language-change") {
+        if (message.userId !== user?.id && languages.includes(message.language)) {
+          setLanguage(message.language);
+        }
+        return;
+      }
+
       setPresence((prev) => {
         if (!prev) {
           return prev;
@@ -497,7 +528,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
       const syncLatestExecution = async () => {
         try {
-          const response = await apiRequest<RoomResponse>(`/rooms/${roomId}`, { accessToken });
+const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
           if (!response.lastExecution) {
             return;
           }
@@ -671,9 +702,8 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     setExecutionState("running");
     setError("");
     try {
-      const result = await apiRequest<{ type: string; stdout?: string; message?: string; status?: string; requestId?: string }>("/execute", {
+      const result = await authRequest<{ type: string; stdout?: string; message?: string; status?: string; requestId?: string }>("/execute", {
         method: "POST",
-        accessToken,
         body: {
           roomId,
           language,
@@ -721,9 +751,8 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
 
   const endRoom = async () => {
     try {
-      await apiRequest<{ room: RoomResponse["room"] }>(`/rooms/${roomId}/end`, {
+      await authRequest<{ room: RoomResponse["room"] }>(`/rooms/${roomId}/end`, {
         method: "PATCH",
-        accessToken,
       });
       pushToast("Room ended", "success");
       router.push("/");
@@ -780,7 +809,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
             {/* Editor Toolbar */}
             <EditorToolbar
               language={language}
-              onLanguageChange={setLanguage}
+              onLanguageChange={handleLanguageChange}
               onRun={() => void runCode()}
               onEndRoom={() => void endRoom()}
               onToggleVideo={toggleVideoPanel}

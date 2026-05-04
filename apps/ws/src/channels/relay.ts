@@ -1,5 +1,5 @@
 import { type RawData, WebSocket } from "ws";
-import { addChatMessage } from "@repo/db/redis";
+import { addChatMessage, setRoomLanguage } from "@repo/db/redis";
 
 import { getSocketsForRoom } from "../rooms.js";
 import type { RoomSocketsMap } from "../types.js";
@@ -31,6 +31,12 @@ export type RelayMessage =
       userName: string;
       message: string;
       timestamp: number;
+    }
+  | {
+      type: "language-change";
+      roomId: string;
+      language: string;
+      userId: string;
     };
 
 const sendJson = (ws: WebSocket, payload: unknown) => {
@@ -84,7 +90,7 @@ export const handleRelayMessage = (
   }
 
   const parsedType = typeof parsed.type === "string" ? parsed.type : "";
-  if (!["execution-result", "execution-error", "room-ended", "chat-message"].includes(parsedType)) {
+  if (!["execution-result", "execution-error", "room-ended", "chat-message", "language-change"].includes(parsedType)) {
     sendJson(ws, { type: "error", message: "Unsupported relay message" });
     return;
   }
@@ -104,6 +110,15 @@ export const handleRelayMessage = (
     });
 
     broadcastJson(deps, roomId, parsed);
+    return;
+  }
+
+  if (parsedType === "language-change") {
+    const language = typeof parsed.language === "string" ? parsed.language : "";
+    if (language) {
+      void setRoomLanguage(roomId, language);
+    }
+    broadcastJson(deps, roomId, parsed, ws);
     return;
   }
 

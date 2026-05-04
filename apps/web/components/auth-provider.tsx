@@ -1,14 +1,19 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-import { apiRequest } from "../lib/api";
+import { ApiError, apiRequest, refreshAccessToken } from "../lib/api";
 
 type AuthState = "loading" | "authenticated" | "unauthenticated";
 
 type AuthUser = {
   id: string;
   email: string;
+};
+
+type ApiRequestOptions = {
+  method?: "GET" | "POST" | "PATCH";
+  body?: unknown;
 };
 
 type AuthContextValue = {
@@ -18,6 +23,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  authRequest: <T>(path: string, options?: ApiRequestOptions) => Promise<T>;
 };
 
 const STORAGE_KEY = "quorum_access_token";
@@ -50,11 +56,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState("");
 
+  const tokenRef = useRef(accessToken);
+  tokenRef.current = accessToken;
+
+  const tryRefreshAndValidate = async (): Promise<{ token: string; user: AuthUser } | null> => {
+    const newToken = await refreshAccessToken();
+    if (!newToken) return null;
+
+    try {
+      const response = await apiRequest<{ user: AuthUser }>("/protected", { accessToken: newToken });
+      return { token: newToken, user: response.user };
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     const initialize = async () => {
       const token = readToken();
       if (!token) {
-        setState("unauthenticated");
+        const refreshResult = await tryRefreshAndValidate();
+        if (refreshResult) {
+          writeToken(refreshResult.token);
+          setAccessToken(refreshResult.token);
+          setUser(refreshResult.user);
+          setState("authenticated");
+        } else {
+          setState("unauthenticated");
+        }
         return;
       }
 
@@ -64,10 +93,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(response.user);
         setState("authenticated");
       } catch {
-        writeToken("");
-        setAccessToken("");
-        setUser(null);
-        setState("unauthenticated");
+        const refreshResult = await tryRefreshAndValidate();
+        if (refreshResult) {
+          writeToken(refreshResult.token);
+          setAccessToken(refreshResult.token);
+          setUser(refreshResult.user);
+          setState("authenticated");
+        } else {
+          writeToken("");
+          setAccessToken("");
+          setUser(null);
+          setState("unauthenticated");
+        }
       }
     };
 
@@ -108,7 +145,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const value: AuthContextValue = { state, user, accessToken, login, register, logout };
+  const authRequest = async <T,>(path: string, options: ApiRequestOptions = {}): Promise<T> => {
+    try {
+      return await apiRequest<T>(path, { ...options, accessToken: tokenRef.current });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          writeToken(newToken);
+          setAccessToken(newToken);
+          return await apiRequest<T>(path, { ...options, accessToken: newToken });
+        }
+        writeToken("");
+        setAccessToken("");
+        setUser(null);
+        setState("unauthenticated");
+      }
+      throw error;
+    }
+  };
+
+  const value: AuthContextValue = { state, user, accessToken, login, register, logout, authRequest };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
