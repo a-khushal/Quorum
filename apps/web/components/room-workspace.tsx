@@ -22,8 +22,10 @@ import { Whiteboard } from "./whiteboard";
 const VIDEO_COLLAPSED_KEY = "quorum_video_collapsed";
 const CHAT_OPEN_KEY = "quorum_chat_open";
 const WORKSPACE_VIEW_KEY = "quorum_workspace_view";
+const EDITOR_THEME_KEY = "quorum_editor_theme";
 
 type WorkspaceView = "code" | "whiteboard";
+type EditorTheme = "vs-dark" | "light";
 
 type RoomLanguage = "TYPESCRIPT" | "PYTHON" | "JAVA" | "GO" | "CPP" | "C";
 
@@ -266,11 +268,22 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     }
     return "code";
   });
+  const [editorTheme, setEditorTheme] = useState<EditorTheme>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(EDITOR_THEME_KEY) === "light" ? "light" : "vs-dark";
+    }
+    return "vs-dark";
+  });
   const { pushToast } = useToast();
 
   const handleViewChange = useCallback((view: WorkspaceView) => {
     setWorkspaceView(view);
     localStorage.setItem(WORKSPACE_VIEW_KEY, view);
+  }, []);
+
+  const handleThemeChange = useCallback((theme: EditorTheme) => {
+    setEditorTheme(theme);
+    localStorage.setItem(EDITOR_THEME_KEY, theme);
   }, []);
 
   const toggleVideoPanel = useCallback(() => {
@@ -1048,6 +1061,8 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
               currentView={workspaceView}
               onViewChange={handleViewChange}
               typingUsers={typingUsers}
+              editorTheme={editorTheme}
+              onThemeChange={handleThemeChange}
             />
 
             {workspaceView === "whiteboard" ? (
@@ -1072,6 +1087,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                         }
                       }}
                       readOnly={!editorReady}
+                      editorTheme={editorTheme}
                     />
                   </div>
                 </Panel>

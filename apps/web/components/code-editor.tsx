@@ -4,6 +4,8 @@ import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useRef, useEffect } from "react";
 
+type EditorTheme = "vs-dark" | "light";
+
 type CodeEditorProps = {
   language: string;
   value?: string;
@@ -12,6 +14,7 @@ type CodeEditorProps = {
   onEditorMount?: (instance: editor.IStandaloneCodeEditor) => void;
   onRun?: () => void;
   readOnly?: boolean;
+  editorTheme?: EditorTheme;
 };
 
 const languageMap: Record<string, string> = {
@@ -23,7 +26,7 @@ const languageMap: Record<string, string> = {
   C: "c",
 };
 
-export const CodeEditor = ({ language, value, defaultValue, onChange, onEditorMount, onRun, readOnly = false }: CodeEditorProps) => {
+export const CodeEditor = ({ language, value, defaultValue, onChange, onEditorMount, onRun, readOnly = false, editorTheme = "vs-dark" }: CodeEditorProps) => {
   const onRunRef = useRef(onRun);
 
   useEffect(() => {
@@ -46,7 +49,7 @@ export const CodeEditor = ({ language, value, defaultValue, onChange, onEditorMo
     <Editor
       height="100%"
       language={languageMap[language] ?? "plaintext"}
-      theme="vs-dark"
+      theme={editorTheme}
       value={value}
       defaultValue={defaultValue}
       onChange={onChange ? (next) => onChange(next ?? "") : undefined}
