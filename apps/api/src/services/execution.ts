@@ -19,15 +19,16 @@ const getProvider = () => {
 export const executeCode = async (
   sourceCode: string,
   language: SupportedLanguage,
+  stdin?: string,
   requestId?: string,
 ): Promise<ExecutionResult> => {
   const provider = getProvider();
 
   if (provider === "local") {
-    return await executeLocally(sourceCode, language);
+    return await executeLocally(sourceCode, language, stdin);
   }
 
-  return await executeWithJudge0(sourceCode, language, requestId);
+  return await executeWithJudge0(sourceCode, language, stdin, requestId);
 };
 
 export const getExecutionProvider = () => getProvider();

@@ -6,9 +6,9 @@ import { spawn } from "node:child_process";
 import type { ExecutionResult } from "./judge0.js";
 import type { SupportedLanguage } from "./judge0.js";
 
-const runProcess = async (command: string, args: string[], timeoutMs: number) => {
+const runProcess = async (command: string, args: string[], timeoutMs: number, stdin?: string) => {
   return await new Promise<{ stdout: string; stderr: string; timedOut: boolean }>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { stdio: [stdin ? "pipe" : "ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -18,11 +18,16 @@ const runProcess = async (command: string, args: string[], timeoutMs: number) =>
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    if (stdin && child.stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    }
+
+    child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
@@ -38,25 +43,25 @@ const runProcess = async (command: string, args: string[], timeoutMs: number) =>
   });
 };
 
-const runPython = async (sourceCode: string) => {
+const runPython = async (sourceCode: string, stdin?: string) => {
   const dir = await mkdtemp(join(tmpdir(), "quorum-exec-"));
   const filePath = join(dir, "script.py");
   await writeFile(filePath, sourceCode, "utf8");
 
   try {
-    return await runProcess("python3", [filePath], 10_000);
+    return await runProcess("python3", [filePath], 10_000, stdin);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 };
 
-const runTypescript = async (sourceCode: string) => {
+const runTypescript = async (sourceCode: string, stdin?: string) => {
   const dir = await mkdtemp(join(tmpdir(), "quorum-exec-"));
   const filePath = join(dir, "script.ts");
   await writeFile(filePath, sourceCode, "utf8");
 
   try {
-    return await runProcess("pnpm", ["exec", "tsx", filePath], 10_000);
+    return await runProcess("pnpm", ["exec", "tsx", filePath], 10_000, stdin);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -101,13 +106,13 @@ const toExecutionResult = (result: { stdout: string; stderr: string; timedOut: b
   };
 };
 
-export const executeLocally = async (sourceCode: string, language: SupportedLanguage): Promise<ExecutionResult> => {
+export const executeLocally = async (sourceCode: string, language: SupportedLanguage, stdin?: string): Promise<ExecutionResult> => {
   if (language === "PYTHON") {
-    return toExecutionResult(await runPython(sourceCode));
+    return toExecutionResult(await runPython(sourceCode, stdin));
   }
 
   if (language === "TYPESCRIPT") {
-    return toExecutionResult(await runTypescript(sourceCode));
+    return toExecutionResult(await runTypescript(sourceCode, stdin));
   }
 
   return {

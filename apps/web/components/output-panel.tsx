@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 type ExecutionState = "idle" | "running" | "success" | "error";
 
 type HistoryEntry = {
@@ -12,9 +14,13 @@ type OutputPanelProps = {
   output: string;
   executionState: ExecutionState;
   history: HistoryEntry[];
+  stdin: string;
+  onStdinChange: (value: string) => void;
 };
 
-export const OutputPanel = ({ output, executionState, history }: OutputPanelProps) => {
+export const OutputPanel = ({ output, executionState, history, stdin, onStdinChange }: OutputPanelProps) => {
+  const [stdinOpen, setStdinOpen] = useState(false);
+
   return (
     <div className="flex h-full flex-col bg-nc-editor">
       {/* Status bar */}
@@ -55,21 +61,57 @@ export const OutputPanel = ({ output, executionState, history }: OutputPanelProp
           )}
         </div>
 
-        {/* History dots */}
-        {history.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            {history.map((entry) => (
-              <div
-                key={entry.id}
-                className={`h-2 w-2 rounded-full ${
-                  entry.status === "success" ? "bg-nc-success" : "bg-nc-error"
-                }`}
-                title={`${entry.status} at ${entry.at}`}
-              />
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Stdin toggle */}
+          <button
+            type="button"
+            onClick={() => setStdinOpen((prev) => !prev)}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition ${
+              stdinOpen || stdin
+                ? "bg-nc-primary/20 text-nc-primary"
+                : "text-nc-text-muted hover:text-nc-text"
+            }`}
+            title="Toggle stdin input"
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            stdin
+            {stdin && !stdinOpen && (
+              <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-nc-primary" />
+            )}
+          </button>
+
+          {/* History dots */}
+          {history.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              {history.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={`h-2 w-2 rounded-full ${
+                    entry.status === "success" ? "bg-nc-success" : "bg-nc-error"
+                  }`}
+                  title={`${entry.status} at ${entry.at}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Stdin input area */}
+      {stdinOpen && (
+        <div className="shrink-0 border-b border-nc-border">
+          <textarea
+            className="w-full resize-none bg-nc-body p-3 font-mono text-sm text-nc-text placeholder:text-nc-text-muted outline-none"
+            rows={3}
+            placeholder="Enter stdin input here..."
+            value={stdin}
+            onChange={(e) => onStdinChange(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      )}
 
       {/* Output content */}
       <div className="flex-1 overflow-auto p-3">

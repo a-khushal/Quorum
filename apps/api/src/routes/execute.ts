@@ -80,6 +80,7 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 
   const roomId = getString(req.body?.roomId);
   const sourceCode = getString(req.body?.sourceCode);
+  const stdin = getString(req.body?.stdin) || undefined;
   const language = parseRoomLanguage(req.body?.language);
   const provider = getExecutionProvider();
 
@@ -135,7 +136,7 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const result = await executeCode(sourceCode, language, requestId);
+    const result = await executeCode(sourceCode, language, stdin, requestId);
 
     console.log(
       JSON.stringify({

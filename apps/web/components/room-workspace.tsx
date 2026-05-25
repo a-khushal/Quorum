@@ -6,7 +6,7 @@ import type { editor } from "monaco-editor";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import * as Y from "yjs";
 import * as awarenessProtocol from "y-protocols/awareness";
-import { MonacoBinding } from "y-monaco";
+import { MonacoYjsBinding } from "../lib/monaco-yjs-binding";
 
 import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
@@ -217,6 +217,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const [sourceCode, setSourceCode] = useState(defaultTemplates.TYPESCRIPT);
   const [language, setLanguage] = useState<RoomLanguage>("TYPESCRIPT");
   const [output, setOutput] = useState("Waiting for execution...");
+  const [stdin, setStdin] = useState("");
   const [executionState, setExecutionState] = useState<"idle" | "running" | "success" | "error">("idle");
   const [connectionState, setConnectionState] = useState<"connected" | "reconnecting" | "disconnected">("disconnected");
   const [error, setError] = useState("");
@@ -230,7 +231,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const yDocRef = useRef<Y.Doc | null>(null);
   const yTextRef = useRef<Y.Text | null>(null);
   const awarenessRef = useRef<awarenessProtocol.Awareness | null>(null);
-  const bindingRef = useRef<MonacoBinding | null>(null);
+  const bindingRef = useRef<MonacoYjsBinding | null>(null);
   const createBindingRef = useRef<(() => void) | null>(null);
   const recentRequestIdsRef = useRef<Set<string>>(new Set());
   const previousConnectionStateRef = useRef<"connected" | "reconnecting" | "disconnected">("disconnected");
@@ -671,10 +672,10 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       const model = ed.getModel();
       if (!model) return;
 
-      bindingRef.current = new MonacoBinding(
+      bindingRef.current = new MonacoYjsBinding(
         yText,
         model,
-        new Set([ed]),
+        ed,
         awareness,
       );
     };
@@ -885,10 +886,6 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     window.localStorage.setItem(getDraftKey(roomId), sourceCode);
   }, [roomId, sourceCode]);
 
-  const onEditorChange = (next: string) => {
-    setSourceCode(next);
-  };
-
   const runCode = async () => {
     if (!languages.includes(language)) {
       setExecutionState("error");
@@ -911,6 +908,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
           roomId,
           language,
           sourceCode,
+          stdin: stdin || undefined,
         },
       });
 
@@ -1051,8 +1049,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                   <div className="h-full bg-nc-editor">
                     <CodeEditor
                       language={language}
-                      value={editorReady ? undefined : sourceCode}
-                      onChange={onEditorChange}
+                      defaultValue={sourceCode}
                       onEditorMount={(instance) => {
                         editorRef.current = instance;
                         createBindingRef.current?.();
@@ -1089,6 +1086,8 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                         output={output}
                         executionState={executionState}
                         history={executionHistory}
+                        stdin={stdin}
+                        onStdinChange={setStdin}
                       />
                     </div>
                   </div>

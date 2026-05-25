@@ -7,6 +7,7 @@ import { useRef, useEffect } from "react";
 type CodeEditorProps = {
   language: string;
   value?: string;
+  defaultValue?: string;
   onChange?: (next: string) => void;
   onEditorMount?: (instance: editor.IStandaloneCodeEditor) => void;
   onRun?: () => void;
@@ -22,7 +23,7 @@ const languageMap: Record<string, string> = {
   C: "c",
 };
 
-export const CodeEditor = ({ language, value, onChange, onEditorMount, onRun, readOnly = false }: CodeEditorProps) => {
+export const CodeEditor = ({ language, value, defaultValue, onChange, onEditorMount, onRun, readOnly = false }: CodeEditorProps) => {
   const onRunRef = useRef(onRun);
 
   useEffect(() => {
@@ -47,7 +48,8 @@ export const CodeEditor = ({ language, value, onChange, onEditorMount, onRun, re
       language={languageMap[language] ?? "plaintext"}
       theme="vs-dark"
       value={value}
-      onChange={(next) => onChange?.(next ?? "")}
+      defaultValue={defaultValue}
+      onChange={onChange ? (next) => onChange(next ?? "") : undefined}
       onMount={handleMount}
       options={{
         minimap: { enabled: false },

@@ -39,16 +39,21 @@ export const getJudge0LanguageId = (language: SupportedLanguage) => {
 
 const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const submitToJudge0 = async (sourceCode: string, languageId: number, requestId?: string) => {
+const submitToJudge0 = async (sourceCode: string, languageId: number, stdin?: string, requestId?: string) => {
+  const payload: Record<string, unknown> = {
+    source_code: sourceCode,
+    language_id: languageId,
+  };
+  if (stdin) {
+    payload.stdin = stdin;
+  }
+
   const response = await fetch(`${env.judge0Url}/submissions?base64_encoded=false&wait=false`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      source_code: sourceCode,
-      language_id: languageId,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -78,9 +83,9 @@ const getSubmission = async (token: string) => {
   return (await response.json()) as ExecutionResult;
 };
 
-export const executeWithJudge0 = async (sourceCode: string, language: SupportedLanguage, requestId?: string) => {
+export const executeWithJudge0 = async (sourceCode: string, language: SupportedLanguage, stdin?: string, requestId?: string) => {
   const languageId = getJudge0LanguageId(language);
-  const { token } = await submitToJudge0(sourceCode, languageId, requestId);
+  const { token } = await submitToJudge0(sourceCode, languageId, stdin, requestId);
 
   const timeoutMs = 25_000;
   const intervalMs = 700;
