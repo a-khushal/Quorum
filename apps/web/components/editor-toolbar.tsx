@@ -20,6 +20,7 @@ type EditorToolbarProps = {
   maxChars: number;
   currentView: WorkspaceView;
   onViewChange: (view: WorkspaceView) => void;
+  typingUsers: string[];
 };
 
 const languages: RoomLanguage[] = ["TYPESCRIPT", "PYTHON", "JAVA", "GO", "CPP", "C"];
@@ -48,6 +49,7 @@ export const EditorToolbar = ({
   maxChars,
   currentView,
   onViewChange,
+  typingUsers,
 }: EditorToolbarProps) => {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
@@ -173,6 +175,18 @@ export const EditorToolbar = ({
         </div>
 
       <div className="flex items-center gap-3">
+        {currentView === "code" && typingUsers.length > 0 && (
+          <span className="flex items-center gap-1.5 text-xs text-nc-text-muted italic">
+            <span className="flex gap-0.5">
+              <span className="h-1 w-1 animate-bounce rounded-full bg-nc-text-muted [animation-delay:0ms]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-nc-text-muted [animation-delay:150ms]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-nc-text-muted [animation-delay:300ms]" />
+            </span>
+            {typingUsers.length === 1
+              ? `${typingUsers[0]} is typing`
+              : `${typingUsers.join(", ")} are typing`}
+          </span>
+        )}
         {currentView === "code" && (
           <span className="text-xs text-nc-text-muted">
             {charCount.toLocaleString()}/{maxChars.toLocaleString()}

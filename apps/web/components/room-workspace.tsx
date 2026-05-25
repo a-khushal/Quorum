@@ -257,6 +257,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return false;
   });
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [participants, setParticipants] = useState<Map<string, string>>(new Map());
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() => {
     if (typeof window !== "undefined") {
@@ -719,9 +720,19 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     };
     awareness.on("update", onAwarenessUpdate);
 
-    // Rerender cursor CSS when awareness changes
+    // Rerender cursor CSS + update typing indicators when awareness changes
     const onAwarenessChange = () => {
       updateRemoteCursorStyles(awareness, yDoc.clientID);
+
+      const typing: string[] = [];
+      awareness.getStates().forEach((state, clientId) => {
+        if (clientId === yDoc.clientID) return;
+        if (state.isTyping) {
+          const u = state.user as { name?: string } | undefined;
+          typing.push(u?.name ?? "Someone");
+        }
+      });
+      setTypingUsers(typing);
     };
     awareness.on("change", onAwarenessChange);
 
@@ -1036,6 +1047,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
               maxChars={maxSourceCodeLength}
               currentView={workspaceView}
               onViewChange={handleViewChange}
+              typingUsers={typingUsers}
             />
 
             {workspaceView === "whiteboard" ? (

@@ -26,6 +26,7 @@ export class MonacoYjsBinding {
   private disposables: Disposable[] = [];
   private decorationCollection: monacoTypes.IEditorDecorationsCollection | null = null;
   private isDestroyed = false;
+  private typingTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     ytext: Y.Text,
@@ -67,6 +68,17 @@ export class MonacoYjsBinding {
         }, this); // origin = this binding instance
       } finally {
         this.mutex = true;
+      }
+
+      // Broadcast typing indicator via awareness
+      if (awareness) {
+        awareness.setLocalStateField("isTyping", true);
+        if (this.typingTimeout) clearTimeout(this.typingTimeout);
+        this.typingTimeout = setTimeout(() => {
+          if (!this.isDestroyed && awareness) {
+            awareness.setLocalStateField("isTyping", false);
+          }
+        }, 1000);
       }
     });
     this.disposables.push(modelChangeDisposable);
@@ -224,6 +236,12 @@ export class MonacoYjsBinding {
 
   destroy() {
     this.isDestroyed = true;
+
+    // Clear typing timeout
+    if (this.typingTimeout) {
+      clearTimeout(this.typingTimeout);
+      this.typingTimeout = null;
+    }
 
     // Dispose Monaco listeners
     for (const d of this.disposables) {
