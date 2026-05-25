@@ -20,6 +20,9 @@ type VideoPanelProps = {
   currentUserId: string;
   isCollapsed?: boolean;
   onToggleCollapse: () => void;
+  isChatOpen: boolean;
+  onToggleChat: () => void;
+  unreadChatCount: number;
 };
 
 const rtcConfig: RTCConfiguration = {
@@ -37,6 +40,9 @@ export const VideoPanel = ({
   currentUserId,
   isCollapsed = false,
   onToggleCollapse,
+  isChatOpen,
+  onToggleChat,
+  unreadChatCount,
 }: VideoPanelProps) => {
   const signalSocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -619,6 +625,23 @@ export const VideoPanel = ({
         </button>
         <button
           type="button"
+          onClick={onToggleChat}
+          className={`relative flex h-9 w-9 items-center justify-center rounded-full transition ${
+            isChatOpen ? "bg-nc-primary text-white" : "bg-nc-card-hover text-nc-text hover:text-nc-primary"
+          }`}
+          title="Chat"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          {unreadChatCount > 0 && !isChatOpen && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-nc-error px-1 text-[10px] font-medium text-white">
+              {unreadChatCount > 9 ? "9+" : unreadChatCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={endCall}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-nc-error text-white transition hover:bg-nc-error/80"
           title="End call"
@@ -672,6 +695,7 @@ export const VideoPanel = ({
           </div>
         </div>
       )}
+
     </div>
   );
 };

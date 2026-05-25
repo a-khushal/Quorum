@@ -10,7 +10,7 @@ import * as Y from "yjs";
 import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
 import { AppShell } from "./app-shell";
-import { ChatPanel, type ChatMessage } from "./chat-panel";
+import { ChatDrawer, type ChatMessage } from "./chat-drawer";
 import { CodeEditor } from "./code-editor";
 import { EditorToolbar } from "./editor-toolbar";
 import { OutputPanel } from "./output-panel";
@@ -19,7 +19,7 @@ import { VideoPanel } from "./video-panel";
 import { Whiteboard } from "./whiteboard";
 
 const VIDEO_COLLAPSED_KEY = "quorum_video_collapsed";
-const BOTTOM_TAB_KEY = "quorum_bottom_tab";
+const CHAT_OPEN_KEY = "quorum_chat_open";
 const WORKSPACE_VIEW_KEY = "quorum_workspace_view";
 
 type WorkspaceView = "code" | "whiteboard";
@@ -194,6 +194,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const hasSyncedYjsRef = useRef(false);
   const pendingInitialDraftRef = useRef<string | null>(null);
   const videoPanelRef = usePanelRef();
+  const chatOpenRef = useRef(false);
   const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; status: string; at: string }>>([]);
   const [videoCollapsed, setVideoCollapsed] = useState(() => {
     if (typeof window !== "undefined") {
@@ -202,12 +203,11 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return false; // Default: expanded
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [bottomTab, setBottomTab] = useState<"output" | "chat">(() => {
+  const [chatOpen, setChatOpen] = useState(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(BOTTOM_TAB_KEY);
-      return saved === "chat" ? "chat" : "output";
+      return localStorage.getItem(CHAT_OPEN_KEY) === "true";
     }
-    return "output";
+    return false;
   });
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() => {
@@ -275,15 +275,16 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     [roomId, user],
   );
 
-  const switchToChat = useCallback(() => {
-    setBottomTab("chat");
-    setUnreadChatCount(0);
-    localStorage.setItem(BOTTOM_TAB_KEY, "chat");
-  }, []);
-
-  const switchToOutput = useCallback(() => {
-    setBottomTab("output");
-    localStorage.setItem(BOTTOM_TAB_KEY, "output");
+  const toggleChat = useCallback(() => {
+    setChatOpen((prev) => {
+      const next = !prev;
+      chatOpenRef.current = next;
+      localStorage.setItem(CHAT_OPEN_KEY, String(next));
+      if (next) {
+        setUnreadChatCount(0);
+      }
+      return next;
+    });
   }, []);
 
   // Restore collapsed state from localStorage on mount
@@ -291,6 +292,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     if (videoCollapsed && videoPanelRef.current) {
       videoPanelRef.current.collapse();
     }
+    chatOpenRef.current = chatOpen;
     // Only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -441,8 +443,9 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
           timestamp: message.timestamp,
         };
         setChatMessages((prev) => [...prev, newMessage]);
-        // Only increment unread if not viewing chat tab
-        setUnreadChatCount((prev) => prev + 1);
+        if (!chatOpenRef.current) {
+          setUnreadChatCount((prev) => prev + 1);
+        }
         return;
       }
 
@@ -818,7 +821,8 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       userEmail={user?.email ?? ""}
       onLogout={logout}
     >
-      <Group orientation="horizontal" className="h-full">
+      <div className="flex h-full">
+        <Group orientation="horizontal" className="h-full flex-1">
         {/* Main workspace area */}
         <Panel id="workspace" defaultSize="75%" minSize="50%">
           <div className="flex h-full flex-col">
@@ -865,58 +869,24 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                   <div className="absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize" />
                 </Separator>
 
-                {/* Output/Chat Panel - Bottom */}
+                {/* Output Panel - Bottom */}
                 <Panel id="output" defaultSize="30%" minSize="15%">
                   <div className="flex h-full flex-col bg-nc-editor">
-                    {/* Tabs */}
-                    <div className="flex shrink-0 border-b border-nc-border">
-                      <button
-                        type="button"
-                        onClick={switchToOutput}
-                        className={`px-4 py-2 text-sm font-medium transition ${
-                          bottomTab === "output"
-                            ? "border-b-2 border-nc-primary text-nc-text"
-                            : "text-nc-text-secondary hover:text-nc-text"
-                        }`}
-                      >
-                        Output
-                        {executionState === "running" && (
-                          <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={switchToChat}
-                        className={`px-4 py-2 text-sm font-medium transition ${
-                          bottomTab === "chat"
-                            ? "border-b-2 border-nc-primary text-nc-text"
-                            : "text-nc-text-secondary hover:text-nc-text"
-                        }`}
-                      >
-                        Chat
-                        {unreadChatCount > 0 && bottomTab !== "chat" && (
-                          <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-nc-primary px-1.5 text-xs text-white">
-                            {unreadChatCount > 99 ? "99+" : unreadChatCount}
-                          </span>
-                        )}
-                      </button>
+                    {/* Header */}
+                    <div className="flex shrink-0 items-center border-b border-nc-border px-4 py-2">
+                      <span className="text-sm font-medium text-nc-text">Output</span>
+                      {executionState === "running" && (
+                        <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-nc-warning" />
+                      )}
                     </div>
 
-                    {/* Tab Content */}
+                    {/* Content */}
                     <div className="flex-1 overflow-hidden">
-                      {bottomTab === "output" ? (
-                        <OutputPanel
-                          output={output}
-                          executionState={executionState}
-                          history={executionHistory}
-                        />
-                      ) : (
-                        <ChatPanel
-                          messages={chatMessages}
-                          currentUserId={user?.id ?? ""}
-                          onSendMessage={sendChatMessage}
-                        />
-                      )}
+                      <OutputPanel
+                        output={output}
+                        executionState={executionState}
+                        history={executionHistory}
+                      />
                     </div>
                   </div>
                 </Panel>
@@ -947,10 +917,25 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
               currentUserId={user.id}
               isCollapsed={videoCollapsed}
               onToggleCollapse={toggleVideoPanel}
+              isChatOpen={chatOpen}
+              onToggleChat={toggleChat}
+              unreadChatCount={unreadChatCount}
             />
           </Panel>
         )}
-      </Group>
+        </Group>
+
+        {/* Chat Drawer - slides in from right */}
+        {user?.id && (
+          <ChatDrawer
+            isOpen={chatOpen}
+            onClose={toggleChat}
+            messages={chatMessages}
+            currentUserId={user.id}
+            onSendMessage={sendChatMessage}
+          />
+        )}
+      </div>
     </AppShell>
   );
 };
