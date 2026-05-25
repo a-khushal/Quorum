@@ -225,6 +225,8 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const yjsSocketRef = useRef<WebSocket | null>(null);
+  const yjsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const yjsReconnectAttemptRef = useRef(0);
   const yDocRef = useRef<Y.Doc | null>(null);
   const yTextRef = useRef<Y.Text | null>(null);
   const awarenessRef = useRef<awarenessProtocol.Awareness | null>(null);
@@ -638,6 +640,8 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       return;
     }
 
+    let active = true;
+
     const MSG_TYPE_DOC = 0;
     const MSG_TYPE_AWARENESS = 1;
 
@@ -657,10 +661,6 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       color: uColor.color,
       colorLight: uColor.light,
     });
-
-    const ws = new WebSocket(buildWsUrl("/ws/yjs", roomId, accessToken));
-    ws.binaryType = "arraybuffer";
-    yjsSocketRef.current = ws;
 
     // --- MonacoBinding creation ---
     // Called when both editor instance and Yjs are ready
@@ -686,19 +686,20 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     };
     yText.observe(onYTextSync);
 
-    // --- Yjs doc update → send over WS ---
+    // --- Yjs doc update → send over WS (uses ref so reconnected sockets work) ---
     const onDocUpdate = (update: Uint8Array, origin: unknown) => {
       if (origin === "ws-sync") return;
-      if (ws.readyState === WebSocket.OPEN) {
+      const sock = yjsSocketRef.current;
+      if (sock && sock.readyState === WebSocket.OPEN) {
         const msg = new Uint8Array(update.length + 1);
         msg[0] = MSG_TYPE_DOC;
         msg.set(update, 1);
-        ws.send(msg);
+        sock.send(msg);
       }
     };
     yDoc.on("update", onDocUpdate);
 
-    // --- Awareness update → send over WS ---
+    // --- Awareness update → send over WS (uses ref) ---
     const onAwarenessUpdate = (
       { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
       origin: unknown,
@@ -706,12 +707,13 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       if (origin === "ws-sync") return;
       const changed = [...added, ...updated, ...removed];
       if (changed.length === 0) return;
-      if (ws.readyState === WebSocket.OPEN) {
+      const sock = yjsSocketRef.current;
+      if (sock && sock.readyState === WebSocket.OPEN) {
         const enc = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
         const msg = new Uint8Array(enc.length + 1);
         msg[0] = MSG_TYPE_AWARENESS;
         msg.set(enc, 1);
-        ws.send(msg);
+        sock.send(msg);
       }
     };
     awareness.on("update", onAwarenessUpdate);
@@ -722,82 +724,126 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     };
     awareness.on("change", onAwarenessChange);
 
-    // --- WS message handler ---
-    ws.onmessage = (event) => {
-      if (typeof event.data === "string") return;
-
-      const data = event.data;
-      let raw: Uint8Array;
-      if (data instanceof ArrayBuffer) {
-        raw = new Uint8Array(data);
-      } else if (data instanceof Blob) {
-        return;
-      } else {
-        raw = new Uint8Array(data as ArrayBufferLike);
+    // --- Reconnection logic ---
+    const clearYjsReconnectTimer = () => {
+      if (yjsReconnectTimerRef.current) {
+        clearTimeout(yjsReconnectTimerRef.current);
+        yjsReconnectTimerRef.current = null;
       }
+    };
 
-      if (raw.byteLength < 2) return;
+    const scheduleYjsReconnect = () => {
+      if (!active) return;
+      clearYjsReconnectTimer();
+      const delay = Math.min(10_000, 500 * 2 ** Math.min(yjsReconnectAttemptRef.current, 6) + Math.random() * 300);
+      yjsReconnectTimerRef.current = setTimeout(() => {
+        yjsReconnectAttemptRef.current += 1;
+        connectYjsSocket();
+      }, delay);
+    };
 
-      const msgType = raw[0];
-      const payload = raw.slice(1);
+    // --- WebSocket connection (called on initial connect and reconnect) ---
+    const connectYjsSocket = () => {
+      if (!active) return;
 
-      if (msgType === MSG_TYPE_DOC) {
-        try {
-          Y.applyUpdate(yDoc, payload, "ws-sync");
-          hasSyncedYjsRef.current = true;
+      const ws = new WebSocket(buildWsUrl("/ws/yjs", roomId, accessToken));
+      ws.binaryType = "arraybuffer";
+      yjsSocketRef.current = ws;
 
-          if (yText.length === 0) {
-            let draft = pendingInitialDraftRef.current;
-            if (!draft) {
-              try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
+      ws.onopen = () => {
+        yjsReconnectAttemptRef.current = 0;
+
+        // Send initial awareness so the server and peers know about us
+        const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, [awareness.clientID]);
+        const msg = new Uint8Array(awarenessUpdate.length + 1);
+        msg[0] = MSG_TYPE_AWARENESS;
+        msg.set(awarenessUpdate, 1);
+        ws.send(msg);
+
+        setTimeout(() => {
+          if (!hasSyncedYjsRef.current) {
+            if (yText.length === 0) {
+              let draft = pendingInitialDraftRef.current;
+              if (!draft) {
+                try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
+              }
+              if (draft) {
+                applyTextDiff(yText, draft);
+              }
             }
-            if (draft) {
-              applyTextDiff(yText, draft);
-            }
+            pendingInitialDraftRef.current = null;
+            hasSyncedYjsRef.current = true;
+            setEditorReady(true);
+            tryCreateBinding();
           }
-          pendingInitialDraftRef.current = null;
-          setEditorReady(true);
-          tryCreateBinding();
-        } catch {
+        }, 500);
+      };
+
+      ws.onmessage = (event) => {
+        if (typeof event.data === "string") return;
+
+        const data = event.data;
+        let raw: Uint8Array;
+        if (data instanceof ArrayBuffer) {
+          raw = new Uint8Array(data);
+        } else if (data instanceof Blob) {
           return;
+        } else {
+          raw = new Uint8Array(data as ArrayBufferLike);
         }
-      } else if (msgType === MSG_TYPE_AWARENESS) {
-        try {
-          awarenessProtocol.applyAwarenessUpdate(awareness, payload, "ws-sync");
-        } catch {
-          // invalid awareness update
-        }
-      }
-    };
 
-    ws.onopen = () => {
-      // Send initial awareness
-      const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, [awareness.clientID]);
-      const msg = new Uint8Array(awarenessUpdate.length + 1);
-      msg[0] = MSG_TYPE_AWARENESS;
-      msg.set(awarenessUpdate, 1);
-      ws.send(msg);
+        if (raw.byteLength < 2) return;
 
-      setTimeout(() => {
-        if (!hasSyncedYjsRef.current) {
-          if (yText.length === 0) {
-            let draft = pendingInitialDraftRef.current;
-            if (!draft) {
-              try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
+        const msgType = raw[0];
+        const payload = raw.slice(1);
+
+        if (msgType === MSG_TYPE_DOC) {
+          try {
+            Y.applyUpdate(yDoc, payload, "ws-sync");
+            hasSyncedYjsRef.current = true;
+
+            if (yText.length === 0) {
+              let draft = pendingInitialDraftRef.current;
+              if (!draft) {
+                try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
+              }
+              if (draft) {
+                applyTextDiff(yText, draft);
+              }
             }
-            if (draft) {
-              applyTextDiff(yText, draft);
-            }
+            pendingInitialDraftRef.current = null;
+            setEditorReady(true);
+            tryCreateBinding();
+          } catch {
+            return;
           }
-          pendingInitialDraftRef.current = null;
-          hasSyncedYjsRef.current = true;
-          setEditorReady(true);
-          tryCreateBinding();
+        } else if (msgType === MSG_TYPE_AWARENESS) {
+          try {
+            awarenessProtocol.applyAwarenessUpdate(awareness, payload, "ws-sync");
+          } catch {
+            // invalid awareness update
+          }
         }
-      }, 500);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+
+      ws.onclose = () => {
+        if (active) {
+          scheduleYjsReconnect();
+        }
+      };
     };
+
+    // Start the initial connection
+    connectYjsSocket();
 
     return () => {
+      active = false;
+      clearYjsReconnectTimer();
+
       // Destroy binding first
       if (bindingRef.current) {
         bindingRef.current.destroy();
@@ -811,12 +857,21 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       awareness.off("change", onAwarenessChange);
       awareness.destroy();
 
-      ws.close();
+      const currentSocket = yjsSocketRef.current;
       yjsSocketRef.current = null;
+      if (currentSocket) {
+        currentSocket.onopen = null;
+        currentSocket.onclose = null;
+        currentSocket.onerror = null;
+        currentSocket.onmessage = null;
+        currentSocket.close();
+      }
+
       yTextRef.current = null;
       yDocRef.current = null;
       awarenessRef.current = null;
       hasSyncedYjsRef.current = false;
+      yjsReconnectAttemptRef.current = 0;
       pendingInitialDraftRef.current = null;
       setEditorReady(false);
 
