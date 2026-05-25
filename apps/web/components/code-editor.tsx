@@ -6,8 +6,8 @@ import { useRef, useEffect } from "react";
 
 type CodeEditorProps = {
   language: string;
-  value: string;
-  onChange: (next: string) => void;
+  value?: string;
+  onChange?: (next: string) => void;
   onEditorMount?: (instance: editor.IStandaloneCodeEditor) => void;
   onRun?: () => void;
   readOnly?: boolean;
@@ -47,7 +47,7 @@ export const CodeEditor = ({ language, value, onChange, onEditorMount, onRun, re
       language={languageMap[language] ?? "plaintext"}
       theme="vs-dark"
       value={value}
-      onChange={(next) => onChange(next ?? "")}
+      onChange={(next) => onChange?.(next ?? "")}
       onMount={handleMount}
       options={{
         minimap: { enabled: false },

@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import * as Y from "yjs";
-
+import * as awarenessProtocol from "y-protocols/awareness";
+import { MonacoBinding } from "y-monaco";
 
 import { buildWsUrl } from "../lib/ws";
 import { useAuth } from "./auth-provider";
@@ -112,6 +113,44 @@ const defaultTemplates: Record<RoomLanguage, string> = {
 
 const getDraftKey = (roomId: string) => `quorum_room_draft_${roomId}`;
 
+const userColors = [
+  { color: "#30bced", light: "#30bced33" },
+  { color: "#6eeb83", light: "#6eeb8333" },
+  { color: "#ffbc42", light: "#ffbc4233" },
+  { color: "#ecd444", light: "#ecd44433" },
+  { color: "#ee6352", light: "#ee635233" },
+  { color: "#9ac2c9", light: "#9ac2c933" },
+  { color: "#8acb88", light: "#8acb8833" },
+  { color: "#1be7ff", light: "#1be7ff33" },
+] as const;
+
+const getRandomColor = () => userColors[Math.floor(Math.random() * userColors.length)]!;
+
+const CURSOR_STYLE_ID = "y-monaco-remote-cursors";
+
+const updateRemoteCursorStyles = (awareness: awarenessProtocol.Awareness, localClientId: number) => {
+  let styleEl = document.getElementById(CURSOR_STYLE_ID);
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = CURSOR_STYLE_ID;
+    document.head.appendChild(styleEl);
+  }
+
+  let css = "";
+  awareness.getStates().forEach((state, clientId) => {
+    if (clientId === localClientId) return;
+    const user = state.user as { name?: string; color?: string; colorLight?: string } | undefined;
+    if (!user) return;
+    const color = user.color ?? "#30bced";
+    const light = user.colorLight ?? `${color}33`;
+    const name = (user.name ?? "").replace(/"/g, '\\"');
+    css += `.yRemoteSelection-${clientId}{background-color:${light}}`;
+    css += `.yRemoteSelectionHead-${clientId}{position:absolute;border-left:${color} solid 2px;border-top:${color} solid 2px;height:100%;box-sizing:border-box}`;
+    css += `.yRemoteSelectionHead-${clientId}::after{content:"${name}";position:absolute;top:-1.4em;left:-2px;background:${color};color:#fff;font-size:10px;padding:1px 4px;border-radius:2px 2px 2px 0;white-space:nowrap;pointer-events:none;font-family:var(--font-geist-mono),monospace;opacity:0.9}`;
+  });
+  styleEl.textContent = css;
+};
+
 const sanitizeOutput = (value: string) => {
   const safe = value.split(String.fromCharCode(0)).join("");
   if (safe.length <= maxOutputLength) {
@@ -188,12 +227,15 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
   const yjsSocketRef = useRef<WebSocket | null>(null);
   const yDocRef = useRef<Y.Doc | null>(null);
   const yTextRef = useRef<Y.Text | null>(null);
-  const isApplyingRemoteUpdateRef = useRef(false);
+  const awarenessRef = useRef<awarenessProtocol.Awareness | null>(null);
+  const bindingRef = useRef<MonacoBinding | null>(null);
+  const createBindingRef = useRef<(() => void) | null>(null);
   const recentRequestIdsRef = useRef<Set<string>>(new Set());
   const previousConnectionStateRef = useRef<"connected" | "reconnecting" | "disconnected">("disconnected");
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const hasSyncedYjsRef = useRef(false);
   const pendingInitialDraftRef = useRef<string | null>(null);
+  const userColorRef = useRef(getRandomColor());
   const videoPanelRef = usePanelRef();
   const chatOpenRef = useRef(false);
   const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; status: string; at: string }>>([]);
@@ -592,69 +634,100 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
   }, [accessToken, connectionState, pushToast, roomId]);
 
   useEffect(() => {
-    if (!accessToken) {
+    if (!accessToken || !user) {
       return;
     }
 
+    const MSG_TYPE_DOC = 0;
+    const MSG_TYPE_AWARENESS = 1;
+
     const yDoc = new Y.Doc();
     const yText = yDoc.getText("source");
+    const awareness = new awarenessProtocol.Awareness(yDoc);
     hasSyncedYjsRef.current = false;
     yDocRef.current = yDoc;
     yTextRef.current = yText;
+    awarenessRef.current = awareness;
+
+    // Set local awareness state (username + color)
+    const uColor = userColorRef.current;
+    const userName = user.email?.split("@")[0] ?? "User";
+    awareness.setLocalStateField("user", {
+      name: userName,
+      color: uColor.color,
+      colorLight: uColor.light,
+    });
 
     const ws = new WebSocket(buildWsUrl("/ws/yjs", roomId, accessToken));
     ws.binaryType = "arraybuffer";
     yjsSocketRef.current = ws;
 
-    const onYTextUpdate = (event: Y.YTextEvent) => {
-      const origin = event.transaction.origin;
-      if (origin === "local-editor") {
-        return;
-      }
+    // --- MonacoBinding creation ---
+    // Called when both editor instance and Yjs are ready
+    const tryCreateBinding = () => {
+      if (bindingRef.current) return;
+      const ed = editorRef.current;
+      if (!ed) return;
+      const model = ed.getModel();
+      if (!model) return;
 
-      const currentEditor = editorRef.current;
-      const previousSelection = currentEditor?.getSelection();
-      const previousPosition = currentEditor?.getPosition();
-
-      isApplyingRemoteUpdateRef.current = true;
-      setSourceCode(yText.toString());
-      isApplyingRemoteUpdateRef.current = false;
-
-      if (currentEditor) {
-        if (previousSelection) {
-          currentEditor.setSelection(previousSelection);
-        }
-        if (previousPosition) {
-          currentEditor.setPosition(previousPosition);
-        }
-      }
+      bindingRef.current = new MonacoBinding(
+        yText,
+        model,
+        new Set([ed]),
+        awareness,
+      );
     };
+    createBindingRef.current = tryCreateBinding;
 
-    yText.observe(onYTextUpdate);
+    // Keep sourceCode state in sync for char counter, draft persistence, execution
+    const onYTextSync = () => {
+      setSourceCode(yText.toString());
+    };
+    yText.observe(onYTextSync);
 
+    // --- Yjs doc update → send over WS ---
     const onDocUpdate = (update: Uint8Array, origin: unknown) => {
-      if (origin === "ws-sync") {
-        return;
-      }
-
+      if (origin === "ws-sync") return;
       if (ws.readyState === WebSocket.OPEN) {
         const msg = new Uint8Array(update.length + 1);
-        msg[0] = 0; // MSG_TYPE_DOC
+        msg[0] = MSG_TYPE_DOC;
         msg.set(update, 1);
         ws.send(msg);
       }
     };
-
     yDoc.on("update", onDocUpdate);
 
-    ws.onmessage = (event) => {
-      if (typeof event.data === "string") {
-        return;
+    // --- Awareness update → send over WS ---
+    const onAwarenessUpdate = (
+      { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
+      origin: unknown,
+    ) => {
+      if (origin === "ws-sync") return;
+      const changed = [...added, ...updated, ...removed];
+      if (changed.length === 0) return;
+      if (ws.readyState === WebSocket.OPEN) {
+        const enc = awarenessProtocol.encodeAwarenessUpdate(awareness, changed);
+        const msg = new Uint8Array(enc.length + 1);
+        msg[0] = MSG_TYPE_AWARENESS;
+        msg.set(enc, 1);
+        ws.send(msg);
       }
+    };
+    awareness.on("update", onAwarenessUpdate);
+
+    // Rerender cursor CSS when awareness changes
+    const onAwarenessChange = () => {
+      updateRemoteCursorStyles(awareness, yDoc.clientID);
+    };
+    awareness.on("change", onAwarenessChange);
+
+    // --- WS message handler ---
+    ws.onmessage = (event) => {
+      if (typeof event.data === "string") return;
 
       const data = event.data;
       let raw: Uint8Array;
-
       if (data instanceof ArrayBuffer) {
         raw = new Uint8Array(data);
       } else if (data instanceof Blob) {
@@ -663,53 +736,54 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
         raw = new Uint8Array(data as ArrayBufferLike);
       }
 
-      if (raw.byteLength < 2) {
-        return;
-      }
+      if (raw.byteLength < 2) return;
 
       const msgType = raw[0];
       const payload = raw.slice(1);
 
-      // Only handle doc updates (MSG_TYPE_DOC = 0); ignore awareness (1) for now
-      if (msgType !== 0) {
-        return;
-      }
+      if (msgType === MSG_TYPE_DOC) {
+        try {
+          Y.applyUpdate(yDoc, payload, "ws-sync");
+          hasSyncedYjsRef.current = true;
 
-      try {
-        Y.applyUpdate(yDoc, payload, "ws-sync");
-        hasSyncedYjsRef.current = true;
-
-        if (yText.length === 0) {
-          let draft = pendingInitialDraftRef.current;
-          if (!draft) {
-            try {
-              draft = window.localStorage.getItem(getDraftKey(roomId));
-            } catch {
-              draft = null;
+          if (yText.length === 0) {
+            let draft = pendingInitialDraftRef.current;
+            if (!draft) {
+              try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
+            }
+            if (draft) {
+              applyTextDiff(yText, draft);
             }
           }
-          if (draft) {
-            applyTextDiff(yText, draft);
-          }
+          pendingInitialDraftRef.current = null;
+          setEditorReady(true);
+          tryCreateBinding();
+        } catch {
+          return;
         }
-        pendingInitialDraftRef.current = null;
-        setEditorReady(true);
-      } catch {
-        return;
+      } else if (msgType === MSG_TYPE_AWARENESS) {
+        try {
+          awarenessProtocol.applyAwarenessUpdate(awareness, payload, "ws-sync");
+        } catch {
+          // invalid awareness update
+        }
       }
     };
 
     ws.onopen = () => {
+      // Send initial awareness
+      const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, [awareness.clientID]);
+      const msg = new Uint8Array(awarenessUpdate.length + 1);
+      msg[0] = MSG_TYPE_AWARENESS;
+      msg.set(awarenessUpdate, 1);
+      ws.send(msg);
+
       setTimeout(() => {
         if (!hasSyncedYjsRef.current) {
           if (yText.length === 0) {
             let draft = pendingInitialDraftRef.current;
             if (!draft) {
-              try {
-                draft = window.localStorage.getItem(getDraftKey(roomId));
-              } catch {
-                draft = null;
-              }
+              try { draft = window.localStorage.getItem(getDraftKey(roomId)); } catch { draft = null; }
             }
             if (draft) {
               applyTextDiff(yText, draft);
@@ -718,22 +792,39 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
           pendingInitialDraftRef.current = null;
           hasSyncedYjsRef.current = true;
           setEditorReady(true);
+          tryCreateBinding();
         }
       }, 500);
     };
 
     return () => {
-      yText.unobserve(onYTextUpdate);
+      // Destroy binding first
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+      createBindingRef.current = null;
+
+      yText.unobserve(onYTextSync);
       yDoc.off("update", onDocUpdate);
+      awareness.off("update", onAwarenessUpdate);
+      awareness.off("change", onAwarenessChange);
+      awareness.destroy();
+
       ws.close();
       yjsSocketRef.current = null;
       yTextRef.current = null;
       yDocRef.current = null;
+      awarenessRef.current = null;
       hasSyncedYjsRef.current = false;
       pendingInitialDraftRef.current = null;
       setEditorReady(false);
+
+      // Clean up cursor styles
+      const styleEl = document.getElementById(CURSOR_STYLE_ID);
+      if (styleEl) styleEl.textContent = "";
     };
-  }, [accessToken, roomId]);
+  }, [accessToken, roomId, user]);
 
   useEffect(() => {
     window.localStorage.setItem(getDraftKey(roomId), sourceCode);
@@ -741,12 +832,6 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
 
   const onEditorChange = (next: string) => {
     setSourceCode(next);
-    const yText = yTextRef.current;
-    if (!yText || isApplyingRemoteUpdateRef.current) {
-      return;
-    }
-
-    applyTextDiff(yText, next);
   };
 
   const runCode = async () => {
@@ -911,10 +996,11 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                   <div className="h-full bg-nc-editor">
                     <CodeEditor
                       language={language}
-                      value={sourceCode}
+                      value={editorReady ? undefined : sourceCode}
                       onChange={onEditorChange}
                       onEditorMount={(instance) => {
                         editorRef.current = instance;
+                        createBindingRef.current?.();
                       }}
                       onRun={() => {
                         if (canExecute && executionState !== "running" && room?.status !== "ENDED") {
