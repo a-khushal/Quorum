@@ -4,10 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import * as Y from "yjs";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { ExcalidrawBinding, yjsToExcalidraw } from "y-excalidraw";
+import { ExcalidrawBinding } from "y-excalidraw";
 import * as awarenessProtocol from "y-protocols/awareness";
 
 import { buildWsUrl } from "../lib/ws";
+
+const MSG_TYPE_DOC = 0;
+const MSG_TYPE_AWARENESS = 1;
 
 const Excalidraw = dynamic(
   async () => {
@@ -123,26 +126,38 @@ export const Whiteboard = ({ roomId, accessToken }: WhiteboardProps) => {
 
       ws.onopen = () => {
         reconnectAttemptRef.current = 0;
+        const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, [awareness.clientID]);
+        const msg = new Uint8Array(awarenessUpdate.length + 1);
+        msg[0] = MSG_TYPE_AWARENESS;
+        msg.set(awarenessUpdate, 1);
+        ws.send(msg);
       };
 
       ws.onmessage = (event) => {
         if (typeof event.data === "string") return;
 
         const data = event.data;
-        let update: Uint8Array;
+        let msg: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
-          update = new Uint8Array(data);
+          msg = new Uint8Array(data);
         } else {
-          update = new Uint8Array(data as ArrayBufferLike);
+          msg = new Uint8Array(data as ArrayBufferLike);
         }
 
-        if (update.byteLength === 0) return;
+        if (msg.byteLength < 2) return;
+
+        const msgType = msg[0];
+        const payload = msg.slice(1);
 
         try {
-          Y.applyUpdate(yDoc, update, "ws-sync");
-          if (!isReady) {
-            setIsReady(true);
+          if (msgType === MSG_TYPE_DOC) {
+            Y.applyUpdate(yDoc, payload, "ws-sync");
+            if (!isReady) {
+              setIsReady(true);
+            }
+          } else if (msgType === MSG_TYPE_AWARENESS) {
+            awarenessProtocol.applyAwarenessUpdate(awareness, payload, "ws-sync");
           }
         } catch {
           // Invalid update
@@ -159,11 +174,29 @@ export const Whiteboard = ({ roomId, accessToken }: WhiteboardProps) => {
       if (origin === "ws-sync") return;
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(update);
+        const msg = new Uint8Array(update.length + 1);
+        msg[0] = MSG_TYPE_DOC;
+        msg.set(update, 1);
+        ws.send(msg);
+      }
+    };
+
+    const onAwarenessUpdate = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+      if (origin === "ws-sync") return;
+      const changedClients = [...added, ...updated, ...removed];
+      if (changedClients.length === 0) return;
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
+        const msg = new Uint8Array(awarenessUpdate.length + 1);
+        msg[0] = MSG_TYPE_AWARENESS;
+        msg.set(awarenessUpdate, 1);
+        ws.send(msg);
       }
     };
 
     yDoc.on("update", onDocUpdate);
+    awareness.on("update", onAwarenessUpdate);
 
     setTimeout(() => {
       if (active && !isReady) {
@@ -177,6 +210,7 @@ export const Whiteboard = ({ roomId, accessToken }: WhiteboardProps) => {
       active = false;
       clearReconnectTimer();
       yDoc.off("update", onDocUpdate);
+      awareness.off("update", onAwarenessUpdate);
 
       if (bindingRef.current) {
         bindingRef.current.destroy();

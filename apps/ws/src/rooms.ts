@@ -11,7 +11,8 @@ export const getChannelFromPath = (pathname: string): Channel | null => {
 };
 
 export const validateRoom = async (roomId: string) => {
-  const roomState = await getRoomState(roomId);
+  const baseRoomId = roomId.endsWith("-wb") ? roomId.slice(0, -3) : roomId;
+  const roomState = await getRoomState(baseRoomId);
   return Boolean(roomState);
 };
 

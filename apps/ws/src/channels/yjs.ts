@@ -5,6 +5,9 @@ import { getRoomYjsState, setRoomYjsState } from "@repo/db/redis";
 import { getSocketsForRoom } from "../rooms.js";
 import type { RoomSocketsMap } from "../types.js";
 
+const MSG_TYPE_DOC = 0;
+const MSG_TYPE_AWARENESS = 1;
+
 type YjsChannelDeps = {
   roomDocs: Map<string, Y.Doc>;
   roomSockets: RoomSocketsMap;
@@ -71,7 +74,10 @@ export const loadDocFromRedis = async (roomDocs: Map<string, Y.Doc>, roomId: str
 export const sendFullStateOnJoin = async (deps: YjsChannelDeps, roomId: string, ws: WebSocket) => {
   const doc = await loadDocFromRedis(deps.roomDocs, roomId);
   const fullState = Y.encodeStateAsUpdate(doc);
-  ws.send(fullState, { binary: true });
+  const msg = Buffer.alloc(fullState.length + 1);
+  msg[0] = MSG_TYPE_DOC;
+  msg.set(fullState, 1);
+  ws.send(msg, { binary: true });
 };
 
 export const handleYjsMessage = (
@@ -85,11 +91,19 @@ export const handleYjsMessage = (
     return;
   }
 
-  const doc = getOrCreateDoc(deps.roomDocs, roomId);
-  const update = toUint8Array(data);
+  const msg = toUint8Array(data);
+  if (msg.length < 2) {
+    return;
+  }
 
-  Y.applyUpdate(doc, update);
-  schedulePersistence(roomId, doc);
+  const msgType = msg[0];
+  const payload = msg.slice(1);
+
+  if (msgType === MSG_TYPE_DOC) {
+    const doc = getOrCreateDoc(deps.roomDocs, roomId);
+    Y.applyUpdate(doc, payload);
+    schedulePersistence(roomId, doc);
+  }
 
   const sockets = getSocketsForRoom(deps.roomSockets, roomId, "yjs");
   for (const socket of sockets) {
@@ -97,6 +111,6 @@ export const handleYjsMessage = (
       continue;
     }
 
-    socket.send(update, { binary: true });
+    socket.send(msg, { binary: true });
   }
 };
