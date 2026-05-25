@@ -101,8 +101,14 @@ export const handleYjsMessage = (
 
   if (msgType === MSG_TYPE_DOC) {
     const doc = getOrCreateDoc(deps.roomDocs, roomId);
-    Y.applyUpdate(doc, payload);
-    schedulePersistence(roomId, doc);
+    try {
+      Y.applyUpdate(doc, payload);
+      schedulePersistence(roomId, doc);
+    } catch {
+      return;
+    }
+  } else if (msgType !== MSG_TYPE_AWARENESS) {
+    return;
   }
 
   const sockets = getSocketsForRoom(deps.roomSockets, roomId, "yjs");

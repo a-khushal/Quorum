@@ -99,9 +99,11 @@ server.on("upgrade", async (request, socket, head) => {
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
+      const userName = authPayload.email.split("@")[0] ?? "User";
       const context: SocketContext = {
         roomId,
         userId: authPayload.sub,
+        userEmail: authPayload.email,
         channel,
       };
 
@@ -121,6 +123,7 @@ server.on("upgrade", async (request, socket, head) => {
           type: "peer-joined",
           roomId,
           userId: authPayload.sub,
+          userName,
           channel,
         },
         ws,
@@ -168,10 +171,12 @@ wss.on("connection", (ws) => {
     removeSocketFromRoom(roomSockets, context.roomId, context.channel, ws);
     void setPresenceOnDisconnect(context.roomId, context.userId);
 
+    const userName = context.userEmail.split("@")[0] ?? "User";
     broadcastPresence(roomSockets, {
       type: "peer-left",
       roomId: context.roomId,
       userId: context.userId,
+      userName,
       channel: context.channel,
     });
   });

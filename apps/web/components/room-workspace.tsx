@@ -73,6 +73,7 @@ type RelayEvent =
       type: "peer-joined" | "peer-left";
       roomId: string;
       userId: string;
+      userName: string;
       channel: string;
     }
   | {
@@ -203,6 +204,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return false; // Default: expanded
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [editorReady, setEditorReady] = useState(false);
   const [chatOpen, setChatOpen] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem(CHAT_OPEN_KEY) === "true";
@@ -210,6 +212,7 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
     return false;
   });
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [participants, setParticipants] = useState<Map<string, string>>(new Map());
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(WORKSPACE_VIEW_KEY);
@@ -456,16 +459,25 @@ export const RoomWorkspace = ({ roomId }: { roomId: string }) => {
         return;
       }
 
-      setPresence((prev) => {
-        if (!prev) {
-          return prev;
-        }
+      if (message.type === "peer-joined") {
+        setParticipants((prev) => {
+          const next = new Map(prev);
+          next.set(message.userId, message.userName);
+          return next;
+        });
+        setPresence((prev) => prev ? { ...prev, userCount: prev.userCount + 1 } : prev);
+        return;
+      }
 
-        return {
-          ...prev,
-          userCount: Math.max(1, prev.userCount + (message.type === "peer-joined" ? 1 : -1)),
-        };
-      });
+      if (message.type === "peer-left") {
+        setParticipants((prev) => {
+          const next = new Map(prev);
+          next.delete(message.userId);
+          return next;
+        });
+        setPresence((prev) => prev ? { ...prev, userCount: Math.max(1, prev.userCount - 1) } : prev);
+        return;
+      }
     };
 
     const scheduleReconnect = () => {
@@ -626,7 +638,10 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       }
 
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(update);
+        const msg = new Uint8Array(update.length + 1);
+        msg[0] = 0; // MSG_TYPE_DOC
+        msg.set(update, 1);
+        ws.send(msg);
       }
     };
 
@@ -638,29 +653,47 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       }
 
       const data = event.data;
-      let update: Uint8Array;
+      let raw: Uint8Array;
 
       if (data instanceof ArrayBuffer) {
-        update = new Uint8Array(data);
+        raw = new Uint8Array(data);
       } else if (data instanceof Blob) {
         return;
       } else {
-        update = new Uint8Array(data as ArrayBufferLike);
+        raw = new Uint8Array(data as ArrayBufferLike);
       }
 
-      if (update.byteLength === 0) {
+      if (raw.byteLength < 2) {
+        return;
+      }
+
+      const msgType = raw[0];
+      const payload = raw.slice(1);
+
+      // Only handle doc updates (MSG_TYPE_DOC = 0); ignore awareness (1) for now
+      if (msgType !== 0) {
         return;
       }
 
       try {
-        Y.applyUpdate(yDoc, update, "ws-sync");
+        Y.applyUpdate(yDoc, payload, "ws-sync");
         hasSyncedYjsRef.current = true;
 
-        const draft = pendingInitialDraftRef.current;
-        if (draft && yText.length === 0) {
-          applyTextDiff(yText, draft);
+        if (yText.length === 0) {
+          let draft = pendingInitialDraftRef.current;
+          if (!draft) {
+            try {
+              draft = window.localStorage.getItem(getDraftKey(roomId));
+            } catch {
+              draft = null;
+            }
+          }
+          if (draft) {
+            applyTextDiff(yText, draft);
+          }
         }
         pendingInitialDraftRef.current = null;
+        setEditorReady(true);
       } catch {
         return;
       }
@@ -669,12 +702,22 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     ws.onopen = () => {
       setTimeout(() => {
         if (!hasSyncedYjsRef.current) {
-          const draft = pendingInitialDraftRef.current;
-          if (draft && yText.length === 0) {
-            applyTextDiff(yText, draft);
+          if (yText.length === 0) {
+            let draft = pendingInitialDraftRef.current;
+            if (!draft) {
+              try {
+                draft = window.localStorage.getItem(getDraftKey(roomId));
+              } catch {
+                draft = null;
+              }
+            }
+            if (draft) {
+              applyTextDiff(yText, draft);
+            }
           }
           pendingInitialDraftRef.current = null;
           hasSyncedYjsRef.current = true;
+          setEditorReady(true);
         }
       }, 500);
     };
@@ -688,6 +731,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
       yDocRef.current = null;
       hasSyncedYjsRef.current = false;
       pendingInitialDraftRef.current = null;
+      setEditorReady(false);
     };
   }, [accessToken, roomId]);
 
@@ -813,12 +857,24 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
     );
   }
 
+  const currentUserName = user?.email?.split("@")[0] ?? "You";
+  const participantNames = useMemo(() => {
+    const names = [currentUserName];
+    for (const name of participants.values()) {
+      if (name !== currentUserName) {
+        names.push(name);
+      }
+    }
+    return names;
+  }, [participants, currentUserName]);
+
   return (
     <AppShell
       roomId={roomId}
       connectionState={connectionState}
       userCount={presence?.userCount ?? 0}
       userEmail={user?.email ?? ""}
+      participants={participantNames}
       onLogout={logout}
     >
       <div className="flex h-full">
@@ -860,6 +916,12 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
                       onEditorMount={(instance) => {
                         editorRef.current = instance;
                       }}
+                      onRun={() => {
+                        if (canExecute && executionState !== "running" && room?.status !== "ENDED") {
+                          void runCode();
+                        }
+                      }}
+                      readOnly={!editorReady}
                     />
                   </div>
                 </Panel>
@@ -915,6 +977,7 @@ const response = await authRequest<RoomResponse>(`/rooms/${roomId}`);
               roomId={roomId}
               accessToken={accessToken}
               currentUserId={user.id}
+              currentUserName={user.email?.split("@")[0] ?? "You"}
               isCollapsed={videoCollapsed}
               onToggleCollapse={toggleVideoPanel}
               isChatOpen={chatOpen}

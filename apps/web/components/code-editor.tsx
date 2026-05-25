@@ -1,13 +1,16 @@
 "use client";
 
-import Editor from "@monaco-editor/react";
+import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { useRef, useEffect } from "react";
 
 type CodeEditorProps = {
   language: string;
   value: string;
   onChange: (next: string) => void;
   onEditorMount?: (instance: editor.IStandaloneCodeEditor) => void;
+  onRun?: () => void;
+  readOnly?: boolean;
 };
 
 const languageMap: Record<string, string> = {
@@ -19,7 +22,25 @@ const languageMap: Record<string, string> = {
   C: "c",
 };
 
-export const CodeEditor = ({ language, value, onChange, onEditorMount }: CodeEditorProps) => {
+export const CodeEditor = ({ language, value, onChange, onEditorMount, onRun, readOnly = false }: CodeEditorProps) => {
+  const onRunRef = useRef(onRun);
+
+  useEffect(() => {
+    onRunRef.current = onRun;
+  }, [onRun]);
+
+  const handleMount = (instance: editor.IStandaloneCodeEditor, monaco: Monaco) => {
+    instance.addAction({
+      id: "run-code",
+      label: "Run Code",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => {
+        onRunRef.current?.();
+      },
+    });
+    onEditorMount?.(instance);
+  };
+
   return (
     <Editor
       height="100%"
@@ -27,7 +48,7 @@ export const CodeEditor = ({ language, value, onChange, onEditorMount }: CodeEdi
       theme="vs-dark"
       value={value}
       onChange={(next) => onChange(next ?? "")}
-      onMount={(instance) => onEditorMount?.(instance)}
+      onMount={handleMount}
       options={{
         minimap: { enabled: false },
         fontSize: 14,
@@ -41,6 +62,7 @@ export const CodeEditor = ({ language, value, onChange, onEditorMount }: CodeEdi
         renderLineHighlight: "line",
         cursorBlinking: "smooth",
         cursorSmoothCaretAnimation: "on",
+        readOnly,
       }}
     />
   );

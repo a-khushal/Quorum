@@ -11,13 +11,14 @@ type SignalPayload =
   | { type: "ice"; roomId: string; candidate: RTCIceCandidateInit; fromUserId?: string }
   | { type: "leave" | "renegotiate"; roomId: string; fromUserId?: string }
   | { type: "media-state"; roomId: string; video: boolean; audio: boolean; fromUserId?: string }
-  | { type: "peer-joined" | "peer-left"; roomId: string; userId: string; channel: string }
+  | { type: "peer-joined" | "peer-left"; roomId: string; userId: string; userName: string; channel: string }
   | { type: "error"; message: string };
 
 type VideoPanelProps = {
   roomId: string;
   accessToken: string;
   currentUserId: string;
+  currentUserName: string;
   isCollapsed?: boolean;
   onToggleCollapse: () => void;
   isChatOpen: boolean;
@@ -38,12 +39,14 @@ export const VideoPanel = ({
   roomId,
   accessToken,
   currentUserId,
+  currentUserName,
   isCollapsed = false,
   onToggleCollapse,
   isChatOpen,
   onToggleChat,
   unreadChatCount,
 }: VideoPanelProps) => {
+  const [remoteUserName, setRemoteUserName] = useState<string | null>(null);
   const signalSocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -362,12 +365,14 @@ export const VideoPanel = ({
       }
 
       if (message.type === "peer-joined" && message.channel === "signal" && message.userId !== currentUserId) {
+        setRemoteUserName(message.userName);
         clearPeerConnection();
         await createOffer(message.userId);
         return;
       }
 
       if (message.type === "peer-left" && message.channel === "signal" && message.userId !== currentUserId) {
+        setRemoteUserName(null);
         clearPeerConnection();
         setPeerMediaState({ video: true, audio: true });
         setCallState("ended");
@@ -564,7 +569,7 @@ export const VideoPanel = ({
             </div>
           )}
           <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
-            <span className="rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">Remote</span>
+            <span className="rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">{remoteUserName ?? "Waiting..."}</span>
             {!peerMediaState.audio && (
               <span className="flex items-center rounded bg-nc-error/80 px-1.5 py-0.5 text-xs text-white">
                 <svg className="mr-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -580,7 +585,7 @@ export const VideoPanel = ({
         <div className="relative flex-1 overflow-hidden rounded-lg bg-nc-editor">
           <video ref={localVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
           <span className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">
-            You
+            {currentUserName}
           </span>
         </div>
       </div>
